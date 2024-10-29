@@ -1,6 +1,7 @@
 
 import React from 'react';
 import Game from './components/Game';
+import ModelViewer from './components/ModelViewer';
 
 
 function App() {
