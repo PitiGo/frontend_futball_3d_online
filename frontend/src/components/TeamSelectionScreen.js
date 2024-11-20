@@ -1,130 +1,520 @@
 import React from 'react';
 
-const TeamSelectionScreen = ({ onTeamSelect, teams }) => {
+const TeamSelectionScreen = ({
+  onTeamSelect,
+  onCharacterSelect,
+  teams,
+  readyState,
+  onToggleReady,
+  currentTeam,
+  playerName,
+  gameInProgress,
+  selectedCharacter
+}) => {
   const maxPlayersPerTeam = 3;
-  
+
+  const teamCharacters = {
+    left: [
+      { id: 'player', name: 'Futbolista', description: 'Jugador equilibrado' },
+      { id: 'pig', name: 'Elvis', description: 'Vieja gloria del Rock' }
+    ],
+    right: [
+      { id: 'turtle', name: 'Cool Girl', description: 'Jugador equilibrado' },
+      { id: 'croc', name: 'Marley', description: 'Fuerte y resistente' }
+    ]
+  };
+
+  if (gameInProgress) {
+    return (
+      <div style={{
+        position: 'fixed',
+        inset: 0,
+        backgroundColor: 'rgba(0, 0, 0, 0.8)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: '0.5rem',
+      }}>
+        <div style={{
+          backgroundColor: 'white',
+          borderRadius: '8px',
+          padding: '0.5rem',
+          textAlign: 'center',
+          maxWidth: '90%',
+        }}>
+          <h2 style={{ color: '#dc2626', marginBottom: '0.5rem', fontSize: '1rem' }}>
+            Partida en Curso
+          </h2>
+          <p style={{
+            color: '#4b5563',
+            marginBottom: '0.5rem',
+            fontSize: '0.875rem',
+          }}>
+            Lo sentimos, hay una partida en curso en este momento.
+            Por favor, intenta unirte más tarde cuando la partida actual haya terminado.
+          </p>
+          <button
+            onClick={() => window.location.reload()}
+            style={{
+              padding: '0.5rem 1rem',
+              backgroundColor: '#3b82f6',
+              color: 'white',
+              border: 'none',
+              borderRadius: '4px',
+              cursor: 'pointer',
+              fontSize: '0.875rem',
+            }}
+          >
+            Volver a Intentar
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  const getReadyStatus = (team, playerId) => {
+    if (!team || !playerId) return false;
+    if (!readyState || !readyState[team]) return false;
+    const playerStatus = readyState[team].find(p => p.id === playerId);
+    return playerStatus?.ready || false;
+  };
+
+  const isPlayerInTeam = (teamName) => {
+    return teams?.[teamName]?.some(player => player.name === playerName);
+  };
+
+  const getPlayerTeam = () => {
+    if (isPlayerInTeam('left')) return 'left';
+    if (isPlayerInTeam('right')) return 'right';
+    return null;
+  };
+
+  const getCurrentPlayerId = () => {
+    const team = getPlayerTeam();
+    if (team) {
+      return teams[team].find(p => p.name === playerName)?.id;
+    }
+    return null;
+  };
+
+  const playerTeam = getPlayerTeam();
+  const playerId = getCurrentPlayerId();
+
+  const getTeamName = (team) => team === 'left' ? 'Azul' : 'Rojo';
+  const getTeamColor = (team) => team === 'left' ? '#3b82f6' : '#ef4444';
+
   return (
     <div style={{
       position: 'fixed',
       inset: 0,
-      backgroundColor: 'rgba(0, 0, 0, 0.8)',
+      backgroundColor: 'rgba(15, 23, 42, 0.8)',
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
-      padding: '1rem'
+      padding: '0.5rem',
     }}>
       <div style={{
         backgroundColor: 'white',
         borderRadius: '8px',
         width: '100%',
-        maxWidth: '600px',
-        padding: '2rem'
+        maxWidth: '1000px',
+        padding: '1rem',
+        boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)',
+        maxHeight: '95vh',
+        overflowY: 'auto',
       }}>
         <h2 style={{
           textAlign: 'center',
           marginTop: 0,
-          marginBottom: '2rem'
+          marginBottom: '1rem',
+          color: '#1f2937',
+          fontSize: '1.5rem',
+          fontWeight: 'bold',
         }}>
-          Selecciona tu Equipo
+          {!currentTeam
+            ? 'Selecciona tu Equipo'
+            : !selectedCharacter
+              ? `Selecciona tu Personaje - ${getTeamName(currentTeam)}`
+              : 'Prepárate para jugar'}
         </h2>
-
         <div style={{
-          display: 'grid',
-          gridTemplateColumns: '1fr 1fr',
-          gap: '2rem'
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '1rem',
         }}>
-          {/* Equipo Izquierdo */}
-          <div>
+          {/* Equipos */}
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: '1fr 1fr',
+            gap: '1rem',
+          }}>
+            {/* Equipo Mammals */}
             <div style={{
-              textAlign: 'center',
-              fontWeight: 'bold',
-              color: '#2563eb',
-              marginBottom: '1rem'
+              backgroundColor: '#f8fafc',
+              padding: '1rem',
+              borderRadius: '8px',
+              border: '1px solid #e2e8f0',
+              transition: 'all 0.3s ease',
+              opacity: currentTeam === 'right' ? 0.7 : 1,
             }}>
-              Equipo Azul ({teams?.left?.length || 0}/{maxPlayersPerTeam})
-            </div>
-            <div style={{
-              minHeight: '120px',
-              border: '1px solid #e5e7eb',
-              borderRadius: '4px',
-              padding: '0.5rem',
-              marginBottom: '1rem'
-            }}>
-              {teams?.left?.map(player => (
-                <div key={player.id} style={{ padding: '0.25rem' }}>
-                  {player.name}
-                </div>
-              ))}
-            </div>
-            <button
-              onClick={() => onTeamSelect('left')}
-              disabled={teams?.left?.length >= maxPlayersPerTeam}
-              style={{
-                width: '100%',
+              <div style={{
+                textAlign: 'center',
+                fontWeight: 'bold',
+                color: '#3b82f6',
+                marginBottom: '0.5rem',
+                fontSize: '1rem',
+              }}>
+                Equipo Azul ({teams?.left?.length || 0}/{maxPlayersPerTeam})
+              </div>
+              <div style={{
+                backgroundColor: 'white',
+                border: '1px solid #e5e7eb',
+                borderRadius: '8px',
                 padding: '0.5rem',
-                backgroundColor: teams?.left?.length >= maxPlayersPerTeam ? '#94a3b8' : '#2563eb',
-                color: 'white',
-                border: 'none',
-                borderRadius: '4px',
-                cursor: teams?.left?.length >= maxPlayersPerTeam ? 'not-allowed' : 'pointer'
-              }}
-            >
-              Unirse al Equipo Azul
-            </button>
+                marginBottom: '0.5rem',
+                maxHeight: '150px',
+                overflowY: 'auto',
+              }}>
+                {teams?.left?.map(player => (
+                  <div key={player.id} style={{
+                    padding: '0.5rem',
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    borderBottom: '1px solid #f3f4f6',
+                    backgroundColor: player.name === playerName ? '#f0f9ff' : 'transparent',
+                  }}>
+                    <div style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.5rem',
+                    }}>
+                      <span style={{
+                        fontWeight: player.name === playerName ? 'bold' : 'normal',
+                        color: '#1f2937',
+                        fontSize: '0.875rem',
+                      }}>
+                        {player.name}
+                        {player.name === playerName && ' (Tú)'}
+                      </span>
+                      {player.characterType && (
+                        <small style={{
+                          marginLeft: '0.25rem',
+                          color: '#6b7280',
+                          fontSize: '0.75rem',
+                        }}>
+                          ({teamCharacters['left'].find(c => c.id === player.characterType)?.name})
+                        </small>
+                      )}
+                    </div>
+                    <span style={{
+                      color: getReadyStatus('left', player.id) ? '#22c55e' : '#94a3b8',
+                      fontSize: '0.875rem',
+                      fontWeight: '500',
+                    }}>
+                      {getReadyStatus('left', player.id) ? '✓' : '○'}
+                    </span>
+                  </div>
+                ))}
+                {teams?.left?.length === 0 && (
+                  <div style={{
+                    textAlign: 'center',
+                    color: '#94a3b8',
+                    padding: '1rem',
+                    fontSize: '0.875rem',
+                  }}>
+                    Sin jugadores
+                  </div>
+                )}
+              </div>
+              {!currentTeam && (
+                <button
+                  onClick={() => onTeamSelect('left')}
+                  disabled={teams?.left?.length >= maxPlayersPerTeam}
+                  style={{
+                    width: '100%',
+                    padding: '0.75rem',
+                    backgroundColor: teams?.left?.length >= maxPlayersPerTeam ? '#94a3b8' : '#3b82f6',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '8px',
+                    cursor: teams?.left?.length >= maxPlayersPerTeam ? 'not-allowed' : 'pointer',
+                    fontSize: '1rem',
+                    fontWeight: '500',
+                    transition: 'all 0.2s ease',
+                  }}
+                >
+                  Unirse a Azul
+                </button>
+              )}
+            </div>
+
+            {/* Equipo Rojo */}
+            <div style={{
+              backgroundColor: '#f8fafc',
+              padding: '1rem',
+              borderRadius: '8px',
+              border: '1px solid #e2e8f0',
+              transition: 'all 0.3s ease',
+              opacity: currentTeam === 'left' ? 0.7 : 1,
+            }}>
+              <div style={{
+                textAlign: 'center',
+                fontWeight: 'bold',
+                color: '#ef4444',
+                marginBottom: '0.5rem',
+                fontSize: '1rem',
+              }}>
+                Equipo Rojo ({teams?.right?.length || 0}/{maxPlayersPerTeam})
+              </div>
+              <div style={{
+                backgroundColor: 'white',
+                border: '1px solid #e5e7eb',
+                borderRadius: '8px',
+                padding: '0.5rem',
+                marginBottom: '0.5rem',
+                maxHeight: '150px',
+                overflowY: 'auto',
+              }}>
+                {teams?.right?.map(player => (
+                  <div key={player.id} style={{
+                    padding: '0.5rem',
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    borderBottom: '1px solid #f3f4f6',
+                    backgroundColor: player.name === playerName ? '#fff1f2' : 'transparent',
+                  }}>
+                    <div style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.5rem',
+                    }}>
+                      <span style={{
+                        fontWeight: player.name === playerName ? 'bold' : 'normal',
+                        color: '#1f2937',
+                        fontSize: '0.875rem',
+                      }}>
+                        {player.name}
+                        {player.name === playerName && ' (Tú)'}
+                      </span>
+                      {player.characterType && (
+                        <small style={{
+                          marginLeft: '0.25rem',
+                          color: '#6b7280',
+                          fontSize: '0.75rem',
+                        }}>
+                          ({teamCharacters['right'].find(c => c.id === player.characterType)?.name})
+                        </small>
+                      )}
+                    </div>
+                    <span style={{
+                      color: getReadyStatus('right', player.id) ? '#22c55e' : '#94a3b8',
+                      fontSize: '0.875rem',
+                      fontWeight: '500',
+                    }}>
+                      {getReadyStatus('right', player.id) ? '✓' : '○'}
+                    </span>
+                  </div>
+                ))}
+                {teams?.right?.length === 0 && (
+                  <div style={{
+                    textAlign: 'center',
+                    color: '#94a3b8',
+                    padding: '1rem',
+                    fontSize: '0.875rem',
+                  }}>
+                    Sin jugadores
+                  </div>
+                )}
+              </div>
+              {!currentTeam && (
+                <button
+                  onClick={() => onTeamSelect('right')}
+                  disabled={teams?.right?.length >= maxPlayersPerTeam}
+                  style={{
+                    width: '100%',
+                    padding: '0.75rem',
+                    backgroundColor: teams?.right?.length >= maxPlayersPerTeam ? '#94a3b8' : '#ef4444',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '8px',
+                    cursor: teams?.right?.length >= maxPlayersPerTeam ? 'not-allowed' : 'pointer',
+                    fontSize: '1rem',
+                    fontWeight: '500',
+                    transition: 'all 0.2s ease',
+                  }}
+                >
+                  Unirse a Rojo
+                </button>
+              )}
+            </div>
           </div>
 
-          {/* Equipo Derecho */}
-          <div>
-            <div style={{
-              textAlign: 'center',
-              fontWeight: 'bold',
-              color: '#dc2626',
-              marginBottom: '1rem'
-            }}>
-              Equipo Rojo ({teams?.right?.length || 0}/{maxPlayersPerTeam})
-            </div>
-            <div style={{
-              minHeight: '120px',
-              border: '1px solid #e5e7eb',
-              borderRadius: '4px',
-              padding: '0.5rem',
-              marginBottom: '1rem'
-            }}>
-              {teams?.right?.map(player => (
-                <div key={player.id} style={{ padding: '0.25rem' }}>
-                  {player.name}
+          {/* Selección de Personaje y Botón Ready */}
+          {currentTeam && (
+            <>
+              <div style={{
+                backgroundColor: '#f8fafc',
+                padding: '1.5rem',
+                borderRadius: '8px',
+                border: '1px solid #e2e8f0',
+              }}>
+                <h3 style={{
+                  textAlign: 'center',
+                  marginBottom: '1.5rem',
+                  color: getTeamColor(currentTeam),
+                  fontSize: '1.25rem',
+                  fontWeight: 'bold',
+                }}>
+                  {selectedCharacter
+                    ? `Tu personaje: ${teamCharacters[currentTeam].find(c => c.id === selectedCharacter)?.name}`
+                    : `Selecciona tu personaje para el equipo ${getTeamName(currentTeam)}`}
+                </h3>
+
+                <div style={{
+                  display: 'grid',
+                  gridTemplateColumns: '1fr 1fr',
+                  gap: '1.5rem',
+                  maxWidth: '800px',
+                  margin: '0 auto',
+                }}>
+                  {teamCharacters[currentTeam].map(character => (
+                    <div
+                      key={character.id}
+                      onClick={() => !getReadyStatus(currentTeam, playerId) && onCharacterSelect(character.id)}
+                      style={{
+                        backgroundColor: character.id === selectedCharacter ? '#f0f9ff' : 'white',
+                        padding: '1rem',
+                        borderRadius: '12px',
+                        border: `2px solid ${character.id === selectedCharacter ? getTeamColor(currentTeam) : '#e2e8f0'}`,
+                        cursor: getReadyStatus(currentTeam, playerId) ? 'not-allowed' : 'pointer',
+                        transition: 'all 0.2s ease',
+                        opacity: getReadyStatus(currentTeam, playerId) && character.id !== selectedCharacter ? 0.5 : 1,
+                        textAlign: 'center',
+                      }}
+                    >
+                      <div style={{
+                        width: '100%',
+                        height: '200px',
+                        backgroundColor: '#e5e7eb',
+                        borderRadius: '8px',
+                        marginBottom: '1rem',
+                        backgroundImage: `url(/thumbnails/${character.id}.png)`,
+                        backgroundSize: 'cover',
+                        backgroundPosition: 'center',
+                      }} />
+                      <h3 style={{
+                        fontSize: '1.25rem',
+                        fontWeight: 'bold',
+                        marginBottom: '0.5rem',
+                        color: getTeamColor(currentTeam),
+                      }}>
+                        {character.name}
+                      </h3>
+                      <p style={{
+                        fontSize: '1rem',
+                        color: '#6b7280',
+                        margin: 0,
+                      }}>
+                        {character.description}
+                      </p>
+                    </div>
+                  ))}
                 </div>
-              ))}
-            </div>
-            <button
-              onClick={() => onTeamSelect('right')}
-              disabled={teams?.right?.length >= maxPlayersPerTeam}
-              style={{
-                width: '100%',
-                padding: '0.5rem',
-                backgroundColor: teams?.right?.length >= maxPlayersPerTeam ? '#94a3b8' : '#dc2626',
-                color: 'white',
-                border: 'none',
-                borderRadius: '4px',
-                cursor: teams?.right?.length >= maxPlayersPerTeam ? 'not-allowed' : 'pointer'
-              }}
-            >
-              Unirse al Equipo Rojo
-            </button>
+              </div>
+
+              {selectedCharacter && (
+                <div style={{
+                  textAlign: 'center',
+                  marginTop: '1rem',
+                }}>
+                  <button
+                    onClick={onToggleReady}
+                    style={{
+                      padding: '0.75rem 2rem',
+                      backgroundColor: getReadyStatus(currentTeam, playerId)
+                        ? '#22c55e'
+                        : '#eab308',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: '8px',
+                      cursor: 'pointer',
+                      fontSize: '1.125rem',
+                      fontWeight: 'bold',
+                      transition: 'all 0.2s',
+                      boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)',
+                    }}
+                  >
+                    {getReadyStatus(currentTeam, playerId)
+                      ? '🚫 CANCELAR'
+                      : '✓ COMENZAR'}
+                  </button>
+                </div>
+              )}
+            </>
+          )}
+
+          {/* Mensaje de estado */}
+          <div style={{
+            textAlign: 'center',
+            color: '#64748b',
+            fontSize: '0.875rem',
+            padding: '0.75rem',
+            backgroundColor: 'rgba(241, 245, 249, 0.5)',
+            borderRadius: '8px',
+            marginTop: '0.5rem',
+          }}>
+            {!currentTeam
+              ? "👈 Selecciona un equipo para continuar"
+              : !selectedCharacter
+                ? `👆 Selecciona un personaje para el ${getTeamName(currentTeam)}`
+                : getReadyStatus(currentTeam, playerId)
+                  ? "⌛ Esperando a que todos los jugadores estén listos..."
+                  : "✨ ¡Pulsa COMENZAR cuando estés listo!"}
           </div>
         </div>
 
-        <div style={{
-          textAlign: 'center',
-          marginTop: '2rem',
-          color: '#64748b',
-          fontSize: '0.875rem'
-        }}>
-          {(teams?.left?.length > 0 || teams?.right?.length > 0) ? 
-            "Esperando jugadores..." : 
-            "Sé el primero en elegir equipo"
-          }
-        </div>
+        {/* Estilos CSS adicionales */}
+        <style>
+          {`
+            @keyframes fadeIn {
+              from { opacity: 0; transform: translateY(10px); }
+              to { opacity: 1; transform: translateY(0); }
+            }
+
+            button:not(:disabled):hover {
+              transform: scale(1.05) !important;
+            }
+
+            button:not(:disabled):active {
+              transform: scale(0.95) !important;
+            }
+
+            .character-card {
+              animation: fadeIn 0.3s ease-out;
+            }
+
+            /* Personalización del scrollbar */
+            ::-webkit-scrollbar {
+              width: 8px;
+            }
+
+            ::-webkit-scrollbar-track {
+              background: #f1f1f1;
+              border-radius: 4px;
+            }
+
+            ::-webkit-scrollbar-thumb {
+              background: #888;
+              border-radius: 4px;
+            }
+
+            ::-webkit-scrollbar-thumb:hover {
+              background: #555;
+            }
+          `}
+        </style>
       </div>
     </div>
   );
