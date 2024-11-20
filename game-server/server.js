@@ -1,5 +1,3 @@
-// server/server.js
-
 import express from 'express';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
@@ -9,6 +7,11 @@ import cors from 'cors';
 const app = express();
 app.use(cors());
 
+const TEAM_CHARACTERS = {
+  left: ['player', 'pig'],
+  right: ['turtle', 'croc']
+};
+
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
   cors: {
@@ -17,47 +20,45 @@ const io = new Server(httpServer, {
   }
 });
 
-// En server.js, añade estas constantes al inicio:
+// Constantes y estados del juego
 const MAX_PLAYERS_PER_TEAM = 3;
+const GOALS_TO_WIN = 3;
+
 const teams = {
   left: [],
   right: []
 };
 
+const gameStates = {
+  WAITING: 'waiting',
+  PLAYING: 'playing'
+};
 
-// Mapa para almacenar los jugadores conectados
+let currentGameState = gameStates.WAITING;
 const players = new Map();
 
-// Posición y velocidad de la pelota
-let ballPosition = new Vector3(0, 0.5, 0);
-let ballVelocity = new Vector3(0, 0, 0);
-
-// Constantes del juego
+// Configuración del campo y la física
 const FIELD_WIDTH = 30;
 const FIELD_HEIGHT = 20;
 const BALL_RADIUS = 0.5;
 const PLAYER_RADIUS = 0.5;
 const PLAYER_SPEED = 0.167;
-
-// Constantes de las porterías
 const GOAL_DEPTH = 5;
 const GOAL_Z_MIN = -GOAL_DEPTH / 2;
 const GOAL_Z_MAX = GOAL_DEPTH / 2;
+const BALL_MASS = 0.45;
+const PLAYER_MASS = 75;
+const FRICTION = 0.98;
+const RESTITUTION = 0.8;
 
-// Puntuación
+// Estado de la pelota y puntuación
+let ballPosition = new Vector3(0, 0.5, 0);
+let ballVelocity = new Vector3(0, 0, 0);
 let score = { left: 0, right: 0 };
 
-// Nuevas constantes físicas
-const BALL_MASS = 0.45; // Masa de la pelota en kg
-const PLAYER_MASS = 75; // Masa del jugador en kg
-const FRICTION = 0.98; // Coeficiente de fricción
-const RESTITUTION = 0.8; // Coeficiente de restitución
-
-// Función de sanitización básica
+// Funciones de utilidad
 function sanitizeMessage(message) {
-  // Elimina etiquetas HTML
   const sanitized = message.replace(/<[^>]*>?/gm, '');
-  // Escapa caracteres especiales
   return sanitized
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
@@ -77,15 +78,136 @@ function quaternionToObject(quaternion) {
 function resetBall() {
   ballPosition = new Vector3(0, 0.5, 0);
   ballVelocity = new Vector3(0, 0, 0);
-  console.log('Pelota reiniciada a posición', vector3ToObject(ballPosition));
 }
 
+function getWinningMessage(team) {
+  if (team === 'left') {
+    return '¡El EQUIPO AZUL ha ganado el partido!';
+  } else {
+    return '¡El EQUIPO ROJO ganado el partido!';
+  }
+}
+
+function checkVictory() {
+  if (score.left >= GOALS_TO_WIN) {
+    endGame(getWinningMessage('left'));
+    return true;
+  }
+  if (score.right >= GOALS_TO_WIN) {
+    endGame(getWinningMessage('right'));
+    return true;
+  }
+  return false;
+}
+
+function getReadyStatus() {
+  return {
+    left: teams.left.map(player => ({
+      id: player.id,
+      name: player.name,
+      ready: players.get(player.id)?.ready || false
+    })),
+    right: teams.right.map(player => ({
+      id: player.id,
+      name: player.name,
+      ready: players.get(player.id)?.ready || false
+    }))
+  };
+}
+
+function checkGameStatus() {
+  if (currentGameState !== gameStates.PLAYING) {
+    return;
+  }
+
+  const leftTeamPlayers = teams.left.length;
+  const rightTeamPlayers = teams.right.length;
+  const totalPlayers = leftTeamPlayers + rightTeamPlayers;
+
+  let shouldEndGame = false;
+  let endReason = '';
+
+  if (totalPlayers === 0) {
+    shouldEndGame = true;
+    endReason = 'No hay jugadores conectados';
+  } else if (leftTeamPlayers === 0) {
+    shouldEndGame = true;
+    endReason = 'El equipo azul se quedó sin jugadores';
+  } else if (rightTeamPlayers === 0) {
+    shouldEndGame = true;
+    endReason = 'El equipo rojo se quedó sin jugadores';
+  }
+
+  if (shouldEndGame) {
+    endGame(endReason);
+  }
+}
+
+// En server.js
+function endGame(reason) {
+  currentGameState = gameStates.WAITING;
+  const finalScore = { ...score };
+  score = { left: 0, right: 0 };
+  resetBall();
+
+  // Determinar el equipo ganador basado en la razón o el puntaje
+  const winningTeam = reason.includes('AZUL') ? 'left' : 'right';
+
+  // Limpiar estado de jugadores y equipos
+  teams.left.forEach(player => {
+      const playerData = players.get(player.id);
+      if (playerData) {
+          playerData.ready = false;
+          playerData.characterType = null;
+          playerData.position = new Vector3(-FIELD_WIDTH / 4, 0.5, 
+              (Math.random() * FIELD_HEIGHT - FIELD_HEIGHT / 2) * 0.8);
+      }
+  });
+
+  teams.right.forEach(player => {
+      const playerData = players.get(player.id);
+      if (playerData) {
+          playerData.ready = false;
+          playerData.characterType = null;
+          playerData.position = new Vector3(FIELD_WIDTH / 4, 0.5,
+              (Math.random() * FIELD_HEIGHT - FIELD_HEIGHT / 2) * 0.8);
+      }
+  });
+
+  // Emitir actualización completa de estado
+  const gameEndData = {
+      currentState: currentGameState,
+      reason: reason,
+      finalScore,
+      goalsToWin: GOALS_TO_WIN,
+      winningTeam: winningTeam,  // Añadir explícitamente el equipo ganador
+      players: Array.from(players.values()).map(player => ({
+          id: player.id,
+          name: player.name,
+          team: player.team,
+          characterType: player.characterType,
+          ready: player.ready
+      }))
+  };
+
+  io.emit('gameEnd', gameEndData);
+}
 function updateGameState() {
-  // Verificar si la pelota ha pasado por alguna portería
+  if (currentGameState !== gameStates.PLAYING) {
+    return;
+  }
+
+  // Verificar goles
   if (ballPosition.x < -FIELD_WIDTH / 2 + BALL_RADIUS) {
     if (ballPosition.z >= GOAL_Z_MIN && ballPosition.z <= GOAL_Z_MAX) {
       score.right++;
       console.log(`Gol para el equipo derecho. Puntuación: ${score.left} - ${score.right}`);
+      io.emit('goalScored', {
+        team: 'right',
+        score: score
+      });
+
+      if (checkVictory()) return;
       resetBall();
       return;
     }
@@ -93,188 +215,178 @@ function updateGameState() {
     if (ballPosition.z >= GOAL_Z_MIN && ballPosition.z <= GOAL_Z_MAX) {
       score.left++;
       console.log(`Gol para el equipo izquierdo. Puntuación: ${score.left} - ${score.right}`);
+      io.emit('goalScored', {
+        team: 'left',
+        score: score
+      });
+
+      if (checkVictory()) return;
       resetBall();
       return;
     }
   }
 
-  // Actualizar la posición de la pelota
+  // Actualizar posición de la pelota
   ballPosition = ballPosition.add(ballVelocity);
 
-  // Lógica de rebote mejorada
+  // Rebotes en las paredes
   if (Math.abs(ballPosition.x) > FIELD_WIDTH / 2 - BALL_RADIUS) {
     if (ballPosition.z < GOAL_Z_MIN || ballPosition.z > GOAL_Z_MAX) {
       ballVelocity.x *= -RESTITUTION;
       ballPosition.x = Math.sign(ballPosition.x) * (FIELD_WIDTH / 2 - BALL_RADIUS);
-      console.log(`Pelota rebotó en el borde x: ${ballPosition.x.toFixed(2)}`);
     }
   }
 
   if (Math.abs(ballPosition.z) > FIELD_HEIGHT / 2 - BALL_RADIUS) {
     ballVelocity.z *= -RESTITUTION;
     ballPosition.z = Math.sign(ballPosition.z) * (FIELD_HEIGHT / 2 - BALL_RADIUS);
-    console.log(`Pelota rebotó en el borde z: ${ballPosition.z.toFixed(2)}`);
   }
 
-  // Aplicar fricción a la pelota
+  // Aplicar fricción
   ballVelocity = ballVelocity.scale(FRICTION);
 
-  // Detección de colisiones mejorada
+  // Colisiones jugador-pelota
   players.forEach((player) => {
     const distanceToPlayer = Vector3.Distance(player.position, ballPosition);
     if (distanceToPlayer < PLAYER_RADIUS + BALL_RADIUS) {
-      // Calcular el vector de colisión
       const collisionNormal = ballPosition.subtract(player.position).normalize();
-
-      // Calcular las velocidades relativas
       const relativeVelocity = ballVelocity.subtract(player.velocity);
-
-      // Calcular el impulso
       const impulseStrength = -(1 + RESTITUTION) * Vector3.Dot(relativeVelocity, collisionNormal) /
         (1 / BALL_MASS + 1 / PLAYER_MASS);
 
       const impulse = collisionNormal.scale(impulseStrength);
 
-      // Aplicar el impulso a la pelota y al jugador
       ballVelocity = ballVelocity.add(impulse.scale(1 / BALL_MASS));
       player.velocity = player.velocity.subtract(impulse.scale(1 / PLAYER_MASS));
 
-      // Separar la pelota y el jugador para evitar superposición
       const separation = (PLAYER_RADIUS + BALL_RADIUS - distanceToPlayer) * 0.5;
       ballPosition = ballPosition.add(collisionNormal.scale(separation));
       player.position = player.position.subtract(collisionNormal.scale(separation));
-
-      console.log(`Colisión entre pelota y jugador ${player.id}. Nueva velocidad de la pelota: (${ballVelocity.x.toFixed(2)}, ${ballVelocity.y.toFixed(2)}, ${ballVelocity.z.toFixed(2)})`);
     }
   });
 
-  // Limitar la velocidad máxima del balón
+  // Limitar velocidad de la pelota
   const MAX_BALL_SPEED = 1;
   if (ballVelocity.length() > MAX_BALL_SPEED) {
     ballVelocity = ballVelocity.normalize().scale(MAX_BALL_SPEED);
   }
 
-  // Actualizar la posición de los jugadores según sus movimientos
+  // Actualizar posiciones de jugadores
   players.forEach((player) => {
     let playerVelocity = new Vector3(0, 0, 0);
+    const speedMultiplier = 1;
 
-    // Movimiento en diagonal
-    const speedMultiplier = 1; // Puedes ajustar este valor si quieres que el movimiento diagonal sea más lento
+    if (player.movement.up) playerVelocity.z += PLAYER_SPEED * speedMultiplier;
+    if (player.movement.down) playerVelocity.z -= PLAYER_SPEED * speedMultiplier;
+    if (player.movement.left) playerVelocity.x -= PLAYER_SPEED * speedMultiplier;
+    if (player.movement.right) playerVelocity.x += PLAYER_SPEED * speedMultiplier;
 
-    if (player.movement.up) {
-      playerVelocity.z += PLAYER_SPEED * speedMultiplier;
-    }
-    if (player.movement.down) {
-      playerVelocity.z -= PLAYER_SPEED * speedMultiplier;
-    }
-    if (player.movement.left) {
-      playerVelocity.x -= PLAYER_SPEED * speedMultiplier;
-    }
-    if (player.movement.right) {
-      playerVelocity.x += PLAYER_SPEED * speedMultiplier;
-    }
-
-    // Actualizar posición del jugador
     player.position = player.position.add(playerVelocity);
-
-    // Guardar velocidad del jugador
     player.velocity = playerVelocity.clone();
 
-    // Limitar la posición dentro del campo
+    // Limitar posición dentro del campo
     player.position.x = Math.max(Math.min(player.position.x, FIELD_WIDTH / 2 - PLAYER_RADIUS), -FIELD_WIDTH / 2 + PLAYER_RADIUS);
     player.position.z = Math.max(Math.min(player.position.z, FIELD_HEIGHT / 2 - PLAYER_RADIUS), -FIELD_HEIGHT / 2 + PLAYER_RADIUS);
   });
 
-  // Preparar el estado del juego para enviar
+  // Emitir estado del juego
   const gameState = {
     players: Array.from(players.values()).map(player => ({
       id: player.id,
       name: player.name,
       position: vector3ToObject(player.position),
       rotation: quaternionToObject(player.rotation),
-      isMoving: player.movement.up || player.movement.down ||
-        player.movement.left || player.movement.right
+      isMoving: player.movement.up || player.movement.down || player.movement.left || player.movement.right,
+      team: player.team,
+      characterType: player.characterType
     })),
     ballPosition: vector3ToObject(ballPosition),
     score: score,
     connectedPlayers: Array.from(players.values()).map(player => ({
       id: player.id,
-      name: player.name
+      name: player.name,
+      team: player.team,
+      characterType: player.characterType
     }))
   };
 
-  // Emitir el estado del juego a todos los clientes
   io.emit('gameStateUpdate', gameState);
 }
 
-// Iniciar la actualización del estado del juego a 60 FPS
+// Iniciar el bucle del juego
 setInterval(updateGameState, 1000 / 60);
 
-console.log("Servidor iniciado, esperando conexiones...");
-
-// Manejo de conexiones de Socket.IO
+// Manejo de conexiones
 io.on('connection', (socket) => {
   console.log(`Nuevo cliente conectado: ${socket.id}`);
 
-  // Enviar inmediatamente el estado actual de los equipos
   socket.emit('teamUpdate', teams);
+  socket.emit('gameStateInfo', { currentState: currentGameState });
 
-  // Manejar evento de unión al juego
   socket.on('joinGame', (playerData) => {
     const { name } = playerData;
 
-    // Validación del nombre del jugador
     if (typeof name !== 'string' || name.trim() === '') {
       socket.emit('error', { message: 'Nombre inválido' });
       return;
     }
 
-    // Resto del código igual...
+    if (currentGameState === gameStates.PLAYING) {
+      socket.emit('gameInProgress');
+      return;
+    }
+
     players.set(socket.id, {
       id: socket.id,
       name: name,
       team: null,
+      characterType: null,
       position: new Vector3(0, 0.5, 0),
-      rotation: Quaternion.Identity(),
+      rotation: new Quaternion(),
       movement: { up: false, down: false, left: false, right: false },
-      velocity: new Vector3(0, 0, 0)
+      velocity: new Vector3(0, 0, 0),
+      ready: false
     });
 
-    // Después de agregar el jugador, enviar la actualización de equipos
-    socket.emit('teamUpdate', teams);
-
     console.log(`Jugador ${name} agregado con ID ${socket.id}`);
-    console.log(`Total de jugadores: ${players.size}`);
-    console.log('Estado actual de los equipos:', teams);
 
-    // Emitir un evento específico para la actualización de la lista de jugadores
+    socket.emit('teamUpdate', teams);
     io.emit('playersListUpdate', Array.from(players.values()).map(player => ({
       id: player.id,
-      name: player.name
+      name: player.name,
+      characterType: player.characterType
     })));
-
-    // Enviar estado inicial del juego al nuevo jugador
-    const gameState = {
-      players: Array.from(players.values()).map(player => ({
-        id: player.id,
-        name: player.name,
-        position: vector3ToObject(player.position),
-        rotation: quaternionToObject(player.rotation),
-      })),
-      ballPosition: vector3ToObject(ballPosition),
-      score: score,
-      connectedPlayers: Array.from(players.values()).map(player => ({
-        id: player.id,
-        name: player.name
-      }))
-    };
-
-    socket.emit('gameStateUpdate', gameState);
-    console.log(`Estado inicial enviado a ${socket.id}:`, gameState);
   });
 
+  socket.on('selectCharacter', ({ characterType }) => {
+    const player = players.get(socket.id);
+    if (!player) {
+      socket.emit('error', { message: 'Jugador no encontrado' });
+      return;
+    }
 
-  // Añade el manejador para la selección de equipo:
+    if (!player.team && characterType !== null) {
+      socket.emit('error', { message: 'Debes seleccionar un equipo primero' });
+      return;
+    }
+
+    // Permitir null para deseleccionar, o validar el personaje si se está seleccionando uno
+    if (characterType !== null && !TEAM_CHARACTERS[player.team].includes(characterType)) {
+      socket.emit('error', { message: 'Personaje no disponible para este equipo' });
+      return;
+    }
+
+    player.characterType = characterType;
+    console.log(`Jugador ${player.name} ${characterType ? 'seleccionó' : 'deseleccionó'} el personaje: ${characterType}`);
+
+    io.emit('playerUpdate', {
+      id: socket.id,
+      name: player.name,
+      characterType: characterType,
+      team: player.team
+    });
+  });
+
   socket.on('selectTeam', ({ team }) => {
     if (team !== 'left' && team !== 'right') {
       socket.emit('error', { message: 'Equipo inválido' });
@@ -287,85 +399,100 @@ io.on('connection', (socket) => {
     }
 
     const player = players.get(socket.id);
-    if (player && !player.team) {
-      player.team = team;
-      teams[team].push({ id: socket.id, name: player.name });
+    if (!player) {
+      socket.emit('error', { message: 'Jugador no encontrado' });
+      return;
+    }
 
-      // Asignar posición inicial según el equipo
-      player.position = new Vector3(
-        team === 'left' ? -FIELD_WIDTH / 4 : FIELD_WIDTH / 4,
-        0.5,
-        (Math.random() * FIELD_HEIGHT - FIELD_HEIGHT / 2) * 0.8
-      );
+    if (player.team) {
+      const oldTeam = teams[player.team];
+      const index = oldTeam.findIndex(p => p.id === socket.id);
+      if (index !== -1) {
+        oldTeam.splice(index, 1);
+      }
+    }
 
-      // Notificar a todos los clientes sobre la actualización de equipos
-      io.emit('teamUpdate', teams);
+    player.team = team;
+    player.ready = false;
+    teams[team].push({ id: socket.id, name: player.name });
 
-      // Notificar al jugador que su selección fue exitosa
-      socket.emit('teamSelected', { team });
+    player.position = new Vector3(
+      team === 'left' ? -FIELD_WIDTH / 4 : FIELD_WIDTH / 4,
+      0.5,
+      (Math.random() * FIELD_HEIGHT - FIELD_HEIGHT / 2) * 0.8
+    );
 
-      console.log(`Jugador ${player.name} se unió al equipo ${team}`);
+    io.emit('teamUpdate', teams);
+    socket.emit('teamSelected', { team });
+    io.emit('readyUpdate', getReadyStatus());
+
+    checkGameStatus();
+  });
+
+  socket.on('toggleReady', () => {
+    const player = players.get(socket.id);
+    if (player && player.team) {
+      player.ready = !player.ready;
+      console.log(`Jugador ${player.name} (${socket.id}) cambió su estado ready a:`, player.ready);
+
+      const readyStatus = getReadyStatus();
+      io.emit('readyUpdate', readyStatus);
+
+      const allPlayersReady = [...teams.left, ...teams.right]
+        .every(teamPlayer => players.get(teamPlayer.id)?.ready);
+
+      console.log('¿Todos los jugadores están listos?', allPlayersReady);
+
+      if (allPlayersReady && teams.left.length > 0 && teams.right.length > 0) {
+        currentGameState = gameStates.PLAYING;
+        io.emit('gameStart');
+        score = { left: 0, right: 0 };
+        resetBall();
+      }
+
+      io.emit('gameStateInfo', { currentState: currentGameState });
     }
   });
 
-  // Manejar inicio de movimiento
-  socket.on('playerMoveStart', (data) => {
-    const { direction } = data;
-    const validDirections = ['up', 'down', 'left', 'right'];
-
-    // Validar dirección
-    if (!validDirections.includes(direction)) {
-      socket.emit('error', { message: 'Dirección de movimiento inválida' });
+  socket.on('playerMoveStart', ({ direction }) => {
+    if (!['up', 'down', 'left', 'right'].includes(direction)) {
+      socket.emit('error', { message: 'Dirección inválida' });
       return;
     }
 
     const player = players.get(socket.id);
     if (player) {
       player.movement[direction] = true;
-      console.log(`Jugador ${player.id} empezó a moverse en dirección ${direction}`);
     }
   });
 
-  // Manejar detención de movimiento
-  socket.on('playerMoveStop', (data) => {
-    const { direction } = data;
-    const validDirections = ['up', 'down', 'left', 'right'];
-
-    // Validar dirección
-    if (!validDirections.includes(direction)) {
-      socket.emit('error', { message: 'Dirección de movimiento inválida' });
+  socket.on('playerMoveStop', ({ direction }) => {
+    if (!['up', 'down', 'left', 'right'].includes(direction)) {
+      socket.emit('error', { message: 'Dirección inválida' });
       return;
     }
 
     const player = players.get(socket.id);
     if (player) {
       player.movement[direction] = false;
-      console.log(`Jugador ${player.id} dejó de moverse en dirección ${direction}`);
     }
   });
 
-  // Manejar mensajes de chat
   socket.on('chatMessage', (message) => {
     const player = players.get(socket.id);
     if (player && typeof message === 'string') {
       const sanitizedMessage = sanitizeMessage(message.trim());
-
       if (sanitizedMessage.length > 0 && sanitizedMessage.length <= 200) {
-        const chatMessage = {
+        io.emit('chatUpdate', {
           playerId: socket.id,
           playerName: player.name,
           message: sanitizedMessage,
           timestamp: new Date().toISOString()
-        };
-        console.log(`Chat message from ${player.name}: ${sanitizedMessage}`);
-        io.emit('chatUpdate', chatMessage);
-      } else {
-        socket.emit('error', { message: 'Mensaje de chat inválido' });
+        });
       }
     }
   });
 
-  // Modificar el manejo de desconexión para limpiar los equipos:
   socket.on('disconnect', () => {
     const player = players.get(socket.id);
     if (player && player.team) {
@@ -374,24 +501,22 @@ io.on('connection', (socket) => {
       if (index !== -1) {
         teamArray.splice(index, 1);
         io.emit('teamUpdate', teams);
+        io.emit('readyUpdate', getReadyStatus());
       }
     }
     players.delete(socket.id);
     io.emit('playersListUpdate', Array.from(players.values()).map(player => ({
       id: player.id,
       name: player.name,
-      team: player.team
+      team: player.team,
+      characterType: player.characterType
     })));
+
+    checkGameStatus();
   });
-
-
-
 });
 
-// Definir el puerto del servidor
 const PORT = process.env.PORT || 4000;
-
-// Iniciar el servidor
 httpServer.listen(PORT, () => {
   console.log(`Servidor de juego corriendo en el puerto ${PORT}`);
 });
