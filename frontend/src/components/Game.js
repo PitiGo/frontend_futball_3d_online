@@ -10,6 +10,7 @@ import LoadingScreen from './LoadingScreen';
 import LoginScreen from './LoginScreen';
 import CharacterManager from '../services/characterManager';
 import TeamSelectionScreen from './TeamSelectionScreen'
+import MobileJoystick from './MobileJoystick';  // <-- Añadir esta línea
 
 
 const Game = () => {
@@ -51,6 +52,10 @@ const Game = () => {
     const characterManagerRef = useRef(null);
 
 
+    // Añadir detección de dispositivo móvil
+    const [isMobile, setIsMobile] = useState(false);
+
+
     // Añadir la función handleToggleReady que faltaba:
     const handleToggleReady = useCallback(() => {
         if (socketRef.current) {
@@ -64,6 +69,9 @@ const Game = () => {
 
 
     const chatMessagesRef = useRef(null);
+    // Añadir estado para el chat móvil
+    const [chatVisible, setChatVisible] = useState(false);
+    const [isMobileChatExpanded, setIsMobileChatExpanded] = useState(false);
 
 
     const createScene = useCallback((canvas) => {
@@ -113,6 +121,11 @@ const Game = () => {
 
         // Posicionar la cámara
         camera.setPosition(new BABYLON.Vector3(0, 10, -10));
+
+        if (isMobile) {
+            camera.setPosition(new BABYLON.Vector3(0, 15, -15)); // Vista más elevada
+            camera.fov = 0.8; // Campo de visión más amplio
+        }
         camera.setTarget(BABYLON.Vector3.Zero());
         camera.inputs.clear();
         camera.inertia = 0;
@@ -275,7 +288,7 @@ const Game = () => {
         scoreTextRef.current = { left: leftScoreText, right: rightScoreText };
 
         return scene;
-    }, []);
+    }, [isMobile]);
 
     const updateGameState = useCallback((gameState) => {
         if (!sceneReady || !gameState || !characterManagerRef.current) {
@@ -315,6 +328,11 @@ const Game = () => {
                         playerLabel.thickness = 1;
                         playerLabel.color = "white";
                         playerLabel.isPointerBlocker = false;
+
+                        const scale = isMobile ? 0.7 : 1; // Reducir tamaño en móvil
+                        playerLabel.scaling = new BABYLON.Vector3(scale, scale, scale);
+
+
                         advancedTextureRef.current.addControl(playerLabel);
 
 
@@ -468,6 +486,10 @@ const Game = () => {
         }
     };
 
+    const handleChatToggle = () => {
+        setChatVisible(!chatVisible);
+    };
+
 
 
     useEffect(() => {
@@ -490,6 +512,10 @@ const Game = () => {
 
         console.log('Intentando conectar al servidor...');
         socketRef.current = io('http://localhost:4000', { transports: ['websocket'] });
+        // Nueva línea en Game.js
+        /*  socketRef.current = io('https://football-online-3d.dantecollazzi.com', {
+             transports: ['websocket']
+         }); */
 
         socketRef.current.on('connect', () => {
             console.log('Conectado al servidor con Socket ID:', socketRef.current.id);
@@ -811,6 +837,13 @@ const Game = () => {
         });
 
         const handleKeyDown = (event) => {
+
+
+
+            if (chatInputFocusRef.current || isMobile) { // Añadir verificación de isMobile
+                return;
+            }
+
             if (chatInputFocusRef.current) {
                 // Si el chat está enfocado, no procesar el evento para el juego
                 return;
@@ -843,6 +876,11 @@ const Game = () => {
         };
 
         const handleKeyUp = (event) => {
+
+            if (chatInputFocusRef.current || isMobile) { // Añadir verificación de isMobile
+                return;
+            }
+
             if (chatInputFocusRef.current) {
                 // Si el chat está enfocado, no procesar el evento para el juego
                 return;
@@ -893,6 +931,16 @@ const Game = () => {
         };
     }, [createScene, updateGameState]);
 
+    useEffect(() => {
+        const checkMobile = () => {
+            setIsMobile(window.innerWidth <= 768);
+        };
+
+        checkMobile();
+        window.addEventListener('resize', checkMobile);
+        return () => window.removeEventListener('resize', checkMobile);
+    }, []);
+
     // Añadir este useEffect después de los otros
     useEffect(() => {
         scrollToBottom();
@@ -908,6 +956,20 @@ const Game = () => {
         }
     };
 
+    // Modificar la gestión de movimiento para soportar controles táctiles
+    const handleDirectionChange = (direction) => {
+        if (socketRef.current) {
+            if (direction) {
+                socketRef.current.emit('playerMoveStart', { direction });
+            } else {
+                // Detener todos los movimientos cuando se suelta el joystick
+                ['up', 'down', 'left', 'right'].forEach(dir => {
+                    socketRef.current.emit('playerMoveStop', { direction: dir });
+                });
+            }
+        }
+    };
+
     return (
         <div style={{
             position: 'fixed',
@@ -915,7 +977,11 @@ const Game = () => {
             left: 0,
             width: '100%',
             height: '100%',
-            overflow: 'auto'
+            overflow: 'hidden',
+            WebkitTapHighlightColor: 'transparent',
+            WebkitTouchCallout: 'none',
+            userSelect: 'none',
+            touchAction: 'none'
         }}>
             {isLoading && <LoadingScreen />}
 
@@ -923,9 +989,7 @@ const Game = () => {
                 <LoginScreen onJoin={handleJoinGame} />
             )}
 
-
             {!isLoading && hasJoined && !gameStarted && !showingEndMessage && (
-
                 <div style={{ maxHeight: '100%', overflow: 'auto' }}>
                     <TeamSelectionScreen
                         onTeamSelect={(team) => {
@@ -944,10 +1008,9 @@ const Game = () => {
                         playerName={playerName}
                         gameInProgress={gameInProgress}
                         selectedCharacter={selectedCharacter}
+                        isMobile={isMobile}
                     />
-
                 </div>
-
             )}
 
             <canvas
@@ -955,143 +1018,351 @@ const Game = () => {
                 style={{
                     width: '100%',
                     height: '100%',
-                    display: 'block'
+                    display: 'block',
+                    touchAction: 'none'
                 }}
             />
 
             {!isLoading && hasJoined && teamSelected && (
-                <>
-                    {/* Panel Superior */}
-                    <div style={{
-                        position: 'absolute',
-                        top: 0,
-                        left: 0,
-                        right: 0,
-                        padding: '10px',
-                        display: 'flex',
-                        justifyContent: 'space-between',
-                        alignItems: 'flex-start',
-                        pointerEvents: 'none'
-                    }}>
-                        {/* Lista de Jugadores por Equipo */}
+                isMobile ? (
+                    // Layout móvil
+                    <>
+                        {/* Scoreboard */}
                         <div style={{
-                            color: 'white',
-                            fontSize: '14px',
-                            backgroundColor: 'rgba(0, 0, 0, 0.6)',
-                            padding: '10px',
-                            borderRadius: '8px',
-                            maxWidth: '200px',
-                            pointerEvents: 'auto'
-                        }}>
-                            <h3 style={{ margin: '0 0 8px 0' }}>Jugadores</h3>
-                            {/* Equipo Azul */}
-                            <div style={{ marginBottom: '10px' }}>
-                                <h4 style={{
-                                    margin: '0 0 4px 0',
-                                    color: '#3b82f6' // Azul para equipo izquierdo
-                                }}>
-                                    Equipo Azul
-                                </h4>
-                                <ul style={{
-                                    listStyleType: 'none',
-                                    padding: 0,
-                                    margin: 0
-                                }}>
-                                    {teams.left.map(player => (
-                                        <li key={player.id} style={{ marginBottom: '2px' }}>
-                                            {player.name}
-                                        </li>
-                                    ))}
-                                </ul>
-                            </div>
-                            {/* Equipo Rojo */}
-                            <div>
-                                <h4 style={{
-                                    margin: '0 0 4px 0',
-                                    color: '#ef4444' // Rojo para equipo derecho
-                                }}>
-                                    Equipo Rojo
-                                </h4>
-                                <ul style={{
-                                    listStyleType: 'none',
-                                    padding: 0,
-                                    margin: 0
-                                }}>
-                                    {teams.right.map(player => (
-                                        <li key={player.id} style={{ marginBottom: '2px' }}>
-                                            {player.name}
-                                        </li>
-                                    ))}
-                                </ul>
-                            </div>
-                        </div>
-
-                        {/* Instrucciones */}
-                        <div style={{
-                            color: 'white',
-                            fontSize: '14px',
-                            backgroundColor: 'rgba(0, 0, 0, 0.6)',
-                            padding: '10px',
-                            borderRadius: '8px',
-                            pointerEvents: 'auto'
-                        }}>
-                            <h3 style={{ margin: '0 0 8px 0' }}>Controles</h3>
-                            <p style={{ margin: '0 0 4px 0' }}>WASD o ↑←↓→ para moverte</p>
-                            <p style={{ margin: '0' }}>Enter para enviar mensajes</p>
-                        </div>
-                    </div>
-
-                    {/* Panel Inferior */}
-                    <div style={{
-                        position: 'absolute',
-                        bottom: 0,
-                        left: 0,
-                        right: 0,
-                        padding: '10px',
-                        display: 'flex',
-                        justifyContent: 'space-between',
-                        alignItems: 'flex-end',
-                        pointerEvents: 'none'
-                    }}>
-                        {/* Info del Jugador y Conexión */}
-                        <div style={{
+                            position: 'absolute',
+                            top: '8px',
+                            left: '0',
+                            right: '0',
                             display: 'flex',
-                            gap: '10px',
-                            pointerEvents: 'auto'
+                            justifyContent: 'center',
+                            zIndex: 10
                         }}>
+                            <div style={{
+                                backgroundColor: 'rgba(0, 0, 0, 0.6)',
+                                padding: '8px 16px',
+                                borderRadius: '8px',
+                                display: 'flex',
+                                gap: '16px',
+                                alignItems: 'center'
+                            }}>
+                                <span style={{ color: '#3b82f6', fontSize: '24px' }}>
+                                    {scoreTextRef.current?.left.text || '0'}
+                                </span>
+                                <span style={{ color: 'white', fontSize: '24px' }}>-</span>
+                                <span style={{ color: '#ef4444', fontSize: '24px' }}>
+                                    {scoreTextRef.current?.right.text || '0'}
+                                </span>
+                            </div>
+                        </div>
+
+                        {/* Info del jugador */}
+                        <div style={{
+                            position: 'absolute',
+                            top: '64px',
+                            left: '8px',
+                            right: '8px',
+                            backgroundColor: 'rgba(0, 0, 0, 0.6)',
+                            padding: '8px',
+                            borderRadius: '8px',
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            alignItems: 'center',
+                            color: 'white',
+                            fontSize: '12px',
+                            zIndex: 10
+                        }}>
+                            <span>{playerName}</span>
+                            <span style={{
+                                color: currentTeam === 'left' ? '#3b82f6' : '#ef4444'
+                            }}>
+                                {currentTeam === 'left' ? 'Equipo Azul' : 'Equipo Rojo'}
+                            </span>
+                            <span style={{
+                                backgroundColor: isConnected ? 'rgba(39, 174, 96, 0.6)' : 'rgba(231, 76, 60, 0.6)',
+                                padding: '4px 8px',
+                                borderRadius: '4px'
+                            }}>
+                                {isConnected ? 'Conectado' : 'Desconectado'}
+                            </span>
+                        </div>
+
+                        {/* Instrucciones móviles - AÑADIR AQUÍ */}
+                        <div style={{
+                            position: 'absolute',
+                            top: '120px',
+                            left: '50%',
+                            transform: 'translateX(-50%)',
+                            backgroundColor: 'rgba(0, 0, 0, 0.6)',
+                            padding: '8px 16px',
+                            borderRadius: '8px',
+                            color: 'white',
+                            fontSize: '12px',
+                            textAlign: 'center',
+                            zIndex: 10,
+                            opacity: 0.8,
+                            pointerEvents: 'none'
+                        }}>
+                            <p style={{ margin: '4px 0' }}>👇 Usa el joystick para moverte</p>
+                            <p style={{ margin: '4px 0' }}>💬 Toca el ícono del chat para escribir</p>
+                        </div>
+
+                        {/* Joystick */}
+                        <div style={{
+                            position: 'fixed',
+                            bottom: '16px',
+                            left: '50%', // Centrado horizontalmente
+                            transform: 'translateX(-50%)', // Centrado horizontalmente
+                            touchAction: 'none',
+                            zIndex: 20
+                        }}>
+                            <MobileJoystick onDirectionChange={handleDirectionChange} />
+                        </div>
+
+                        {/*Chat minimizable móvil*/}
+                        <div style={{
+                            position: 'fixed',
+                            bottom: isMobileChatExpanded ? '80px' : '16px', // Ajustado para no solapar con el joystick
+                            right: '16px',
+                            width: isMobileChatExpanded ? '80%' : '40px', // Más pequeño cuando está minimizado
+                            height: isMobileChatExpanded ? '200px' : '40px', // Altura fija cuando está minimizado
+                            maxWidth: '300px',
+                            backgroundColor: 'rgba(0, 0, 0, 0.6)',
+                            borderRadius: '8px',
+                            zIndex: 30,
+                            transition: 'all 0.3s ease',
+                            display: 'flex',
+                            flexDirection: 'column'
+                        }}>
+                            <button
+                                onClick={() => setIsMobileChatExpanded(!isMobileChatExpanded)}
+                                style={{
+                                    width: '100%',
+                                    height: isMobileChatExpanded ? '40px' : '100%',
+                                    padding: '8px',
+                                    color: 'white',
+                                    fontSize: '16px',
+                                    textAlign: 'center',
+                                    backgroundColor: 'transparent',
+                                    border: 'none',
+                                    borderBottom: isMobileChatExpanded ? '1px solid rgba(255, 255, 255, 0.1)' : 'none',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center'
+                                }}
+                            >
+                                {isMobileChatExpanded ? 'Chat ▼' : '💬'}
+                            </button>
+
+                            {isMobileChatExpanded && (
+                                <>
+                                    <div style={{
+                                        height: '160px',
+                                        overflowY: 'auto',
+                                        padding: '8px'
+                                    }}>
+                                        {chatMessages.map((msg, index) => {
+                                            const messageColor = teams.left.find(p => p.id === msg.playerId)
+                                                ? '#3b82f6'
+                                                : teams.right.find(p => p.id === msg.playerId)
+                                                    ? '#ef4444'
+                                                    : '#4CAF50';
+
+                                            return (
+                                                <div
+                                                    key={index}
+                                                    style={{
+                                                        marginBottom: '4px',
+                                                        wordBreak: 'break-word',
+                                                        fontSize: '14px',
+                                                        color: 'white'
+                                                    }}
+                                                >
+                                                    <strong style={{ color: messageColor }}>{msg.playerName}: </strong>
+                                                    {msg.message}
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                    <form
+                                        onSubmit={handleChatSubmit}
+                                        style={{
+                                            display: 'flex',
+                                            padding: '8px',
+                                            gap: '4px'
+                                        }}
+                                    >
+                                        <input
+                                            type="text"
+                                            value={chatInput}
+                                            onChange={(e) => setChatInput(e.target.value)}
+                                            onFocus={() => { chatInputFocusRef.current = true; }}
+                                            onBlur={() => { chatInputFocusRef.current = false; }}
+                                            style={{
+                                                flex: 1,
+                                                padding: '6px',
+                                                borderRadius: '4px',
+                                                border: 'none',
+                                                backgroundColor: 'rgba(255, 255, 255, 0.05)',
+                                                color: 'white',
+                                                fontSize: '12px'
+                                            }}
+                                            placeholder="Mensaje..."
+                                        />
+                                        <button
+                                            type="submit"
+                                            style={{
+                                                padding: '6px 12px',
+                                                borderRadius: '4px',
+                                                border: 'none',
+                                                backgroundColor: '#4CAF50',
+                                                color: 'white',
+                                                fontSize: '12px'
+                                            }}
+                                        >
+                                            →
+                                        </button>
+                                    </form>
+                                </>
+                            )}
+                        </div>
+                    </>
+                ) : (
+                    // Layout desktop original
+                    <>
+                        {/* Panel Superior */}
+                        <div style={{
+                            position: 'absolute',
+                            top: 0,
+                            left: 0,
+                            right: 0,
+                            padding: '10px',
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            alignItems: 'flex-start',
+                            pointerEvents: 'none'
+                        }}>
+                            {/* Lista de Jugadores por Equipo */}
                             <div style={{
                                 color: 'white',
                                 fontSize: '14px',
                                 backgroundColor: 'rgba(0, 0, 0, 0.6)',
-                                padding: '8px 12px',
+                                padding: '10px',
                                 borderRadius: '8px',
-                                display: 'flex',
-                                alignItems: 'center'
+                                maxWidth: '200px',
+                                pointerEvents: 'auto'
                             }}>
-                                {playerName || 'Desconocido'}
-                                <span style={{
-                                    marginLeft: '8px',
-                                    color: currentTeam === 'left' ? '#3b82f6' : '#ef4444'
-                                }}>
-                                    ({currentTeam === 'left' ? 'Equipo Azul' : 'Equipo Rojo'})
-                                </span>
+                                <h3 style={{ margin: '0 0 8px 0' }}>Jugadores</h3>
+                                {/* Equipo Azul */}
+                                <div style={{ marginBottom: '10px' }}>
+                                    <h4 style={{
+                                        margin: '0 0 4px 0',
+                                        color: '#3b82f6'
+                                    }}>
+                                        Equipo Azul
+                                    </h4>
+                                    <ul style={{
+                                        listStyleType: 'none',
+                                        padding: 0,
+                                        margin: 0
+                                    }}>
+                                        {teams.left.map(player => (
+                                            <li key={player.id} style={{ marginBottom: '2px' }}>
+                                                {player.name}
+                                            </li>
+                                        ))}
+                                    </ul>
+                                </div>
+                                {/* Equipo Rojo */}
+                                <div>
+                                    <h4 style={{
+                                        margin: '0 0 4px 0',
+                                        color: '#ef4444'
+                                    }}>
+                                        Equipo Rojo
+                                    </h4>
+                                    <ul style={{
+                                        listStyleType: 'none',
+                                        padding: 0,
+                                        margin: 0
+                                    }}>
+                                        {teams.right.map(player => (
+                                            <li key={player.id} style={{ marginBottom: '2px' }}>
+                                                {player.name}
+                                            </li>
+                                        ))}
+                                    </ul>
+                                </div>
                             </div>
+
+                            {/* Instrucciones */}
                             <div style={{
                                 color: 'white',
                                 fontSize: '14px',
-                                backgroundColor: isConnected ? 'rgba(39, 174, 96, 0.6)' : 'rgba(231, 76, 60, 0.6)',
-                                padding: '8px 12px',
+                                backgroundColor: 'rgba(0, 0, 0, 0.6)',
+                                padding: '10px',
                                 borderRadius: '8px',
-                                display: 'flex',
-                                alignItems: 'center'
+                                pointerEvents: 'auto'
                             }}>
-                                {isConnected ? 'Conectado' : 'Desconectado'}
+                                <h3 style={{ margin: '0 0 8px 0' }}>Controles</h3>
+                                <p style={{ margin: '0 0 4px 0' }}>
+                                    {isMobile ? 'Usa el joystick para moverte' : 'WASD o ↑←↓→ para moverte'}
+                                </p>
+                                <p style={{ margin: '0' }}>
+                                    {isMobile ? 'Toca el chat para escribir' : 'Enter para enviar mensajes'}
+                                </p>
                             </div>
                         </div>
 
-                        {/* Chat */}
-                        <div
-                            style={{
+                        {/* Panel Inferior */}
+                        <div style={{
+                            position: 'absolute',
+                            bottom: 0,
+                            left: 0,
+                            right: 0,
+                            padding: '10px',
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            alignItems: 'flex-end',
+                            pointerEvents: 'none'
+                        }}>
+                            {/* Info del Jugador y Conexión */}
+                            <div style={{
+                                display: 'flex',
+                                gap: '10px',
+                                pointerEvents: 'auto'
+                            }}>
+                                <div style={{
+                                    color: 'white',
+                                    fontSize: '14px',
+                                    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+                                    padding: '8px 12px',
+                                    borderRadius: '8px',
+                                    display: 'flex',
+                                    alignItems: 'center'
+                                }}>
+                                    {playerName || 'Desconocido'}
+                                    <span style={{
+                                        marginLeft: '8px',
+                                        color: currentTeam === 'left' ? '#3b82f6' : '#ef4444'
+                                    }}>
+                                        ({currentTeam === 'left' ? 'Equipo Azul' : 'Equipo Rojo'})
+                                    </span>
+                                </div>
+                                <div style={{
+                                    color: 'white',
+                                    fontSize: '14px',
+                                    backgroundColor: isConnected ? 'rgba(39, 174, 96, 0.6)' : 'rgba(231, 76, 60, 0.6)',
+                                    padding: '8px 12px',
+                                    borderRadius: '8px',
+                                    display: 'flex',
+                                    alignItems: 'center'
+                                }}>
+                                    {isConnected ? 'Conectado' : 'Desconectado'}
+                                </div>
+                            </div>
+
+                            {/* Chat Desktop */}
+                            <div style={{
                                 width: '300px',
                                 height: '250px',
                                 backgroundColor: 'rgba(0, 0, 0, 0.6)',
@@ -1100,82 +1371,89 @@ const Game = () => {
                                 flexDirection: 'column',
                                 pointerEvents: 'auto'
                             }}>
-                            <div
-                                ref={chatMessagesRef}
-                                style={{
-                                    flex: 1,
-                                    padding: '10px',
-                                    overflowY: 'auto',
-                                    display: 'flex',
-                                    flexDirection: 'column'
-                                }}>
-                                {chatMessages.map((msg, index) => (
-                                    <div
-                                        key={index}
-                                        style={{
-                                            marginBottom: '4px',
-                                            wordBreak: 'break-word',
-                                            fontSize: '14px',
-                                            color: 'white'
-                                        }}
-                                    >
-                                        <strong style={{
-                                            // Determinar el color basado en los equipos actuales
-                                            color: teams.left.find(p => p.id === msg.playerId) ? '#3b82f6' :
-                                                teams.right.find(p => p.id === msg.playerId) ? '#ef4444' :
-                                                    '#4CAF50'
-                                        }}>
-                                            {msg.playerName}:
-                                        </strong>{' '}
-                                        <span style={{ color: 'white' }}>{msg.message}</span>
-                                    </div>
-                                ))}
-                            </div>
-                            <form
-                                onSubmit={handleChatSubmit}
-                                style={{
-                                    display: 'flex',
-                                    padding: '10px',
-                                    gap: '5px',
-                                    borderTop: '1px solid rgba(255, 255, 255, 0.1)'
-                                }}
-                            >
-                                <input
-                                    type="text"
-                                    value={chatInput}
-                                    onChange={(e) => setChatInput(e.target.value)}
-                                    onFocus={() => { chatInputFocusRef.current = true; }}
-                                    onBlur={() => { chatInputFocusRef.current = false; }}
+                                <div
+                                    ref={chatMessagesRef}
                                     style={{
                                         flex: 1,
-                                        padding: '8px',
-                                        borderRadius: '4px',
-                                        border: 'none',
-                                        backgroundColor: 'rgba(255, 255, 255, 0.05)',
-                                        fontSize: '14px',
-                                        color: 'white',
-                                        outline: 'none'
-                                    }}
-                                    placeholder="Escribe un mensaje..."
-                                />
-                                <button
-                                    type="submit"
+                                        padding: '10px',
+                                        overflowY: 'auto',
+                                        display: 'flex',
+                                        flexDirection: 'column'
+                                    }}>
+                                    {chatMessages.map((msg, index) => (
+                                        <div
+                                            key={index}
+                                            style={{
+                                                marginBottom: '4px',
+                                                wordBreak: 'break-word',
+                                                fontSize: '14px',
+                                                color: 'white'
+                                            }}
+                                        >
+                                            <>
+                                                <strong
+                                                    style={{
+                                                        color: teams.left.find(p => p.id === msg.playerId)
+                                                            ? '#3b82f6'
+                                                            : teams.right.find(p => p.id === msg.playerId)
+                                                                ? '#ef4444'
+                                                                : '#4CAF50'
+                                                    }}
+                                                >
+                                                    {msg.playerName}:
+                                                </strong>
+                                                {' '}
+                                                <span style={{ color: 'white' }}>{msg.message}</span>
+                                            </>
+                                        </div>
+                                    ))}
+                                </div>
+                                <form
+                                    onSubmit={handleChatSubmit}
                                     style={{
-                                        padding: '8px 15px',
-                                        borderRadius: '4px',
-                                        border: 'none',
-                                        backgroundColor: '#4CAF50',
-                                        color: 'white',
-                                        cursor: 'pointer',
-                                        fontSize: '14px'
+                                        display: 'flex',
+                                        padding: '10px',
+                                        gap: '5px',
+                                        borderTop: '1px solid rgba(255, 255, 255, 0.1)'
                                     }}
                                 >
-                                    Enviar
-                                </button>
-                            </form>
+                                    <input
+                                        type="text"
+                                        value={chatInput}
+                                        onChange={(e) => setChatInput(e.target.value)}
+                                        onFocus={() => { chatInputFocusRef.current = true; }}
+                                        onBlur={() => { chatInputFocusRef.current = false; }}
+                                        style={{
+                                            flex: 1,
+                                            padding: '8px',
+                                            borderRadius: '4px',
+                                            border: 'none',
+                                            backgroundColor: 'rgba(255, 255, 255, 0.05)',
+                                            fontSize: '14px',
+                                            color: 'white',
+                                            outline: 'none'
+                                        }}
+                                        placeholder="Escribe un mensaje..."
+                                    />
+                                    <button
+                                        type="submit"
+                                        style={{
+                                            padding: '8px 15px',
+                                            borderRadius: '4px',
+                                            border: 'none',
+                                            backgroundColor: '#4CAF50',
+                                            color: 'white',
+                                            cursor: 'pointer',
+                                            fontSize: '14px'
+                                        }}
+                                    >
+                                        Enviar
+                                    </button>
+                                </form>
+                            </div>
                         </div>
-                    </div>
-                </>
+                    </>
+                )
             )}
         </div>
     );
