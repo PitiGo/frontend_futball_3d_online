@@ -17,40 +17,39 @@ const MobileJoystick = ({ onDirectionChange }) => {
         const angle = Math.atan2(deltaY, deltaX);
         const distance = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
         const maxDistance = 50;
-        const deadzone = 10; // Reducido para mayor sensibilidad
-
+        const deadzone = 10;
+    
         if (distance < deadzone) {
             setStickPosition({ x: 0, y: 0 });
             return null;
         }
-
+    
         // Normalizar la posición del stick
         const normalizedDistance = Math.min(distance, maxDistance);
         const normalizedX = (deltaX / distance) * normalizedDistance;
         const normalizedY = (deltaY / distance) * normalizedDistance;
         setStickPosition({ x: normalizedX, y: normalizedY });
-
+    
         let degrees = ((angle * 180) / Math.PI + 360) % 360;
-
+    
         // Zonas de dirección ajustadas
         if (degrees >= 45 && degrees < 135) return 'down';
         if (degrees >= 135 && degrees < 225) return 'left';
         if (degrees >= 225 && degrees < 315) return 'up';
         return 'right';
     }, []);
-
     const handleInput = useCallback((clientX, clientY) => {
         if (!joystickRef.current) return;
-    
+
         const rect = joystickRef.current.getBoundingClientRect();
         const centerX = rect.left + rect.width / 2;
         const centerY = rect.top + rect.height / 2;
-    
+
         const deltaX = clientX - centerX;
         const deltaY = clientY - centerY;
-    
+
         const newDirection = calculateDirection(deltaX, deltaY);
-        
+
         // Emitir siempre una nueva dirección, incluso si es la misma
         setCurrentDirection(newDirection);
         if (newDirection) {

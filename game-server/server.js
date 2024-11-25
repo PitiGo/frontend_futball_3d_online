@@ -155,39 +155,39 @@ function endGame(reason) {
 
   // Limpiar estado de jugadores y equipos
   teams.left.forEach(player => {
-      const playerData = players.get(player.id);
-      if (playerData) {
-          playerData.ready = false;
-          playerData.characterType = null;
-          playerData.position = new Vector3(-FIELD_WIDTH / 4, 0.5, 
-              (Math.random() * FIELD_HEIGHT - FIELD_HEIGHT / 2) * 0.8);
-      }
+    const playerData = players.get(player.id);
+    if (playerData) {
+      playerData.ready = false;
+      playerData.characterType = null;
+      playerData.position = new Vector3(-FIELD_WIDTH / 4, 0.5,
+        (Math.random() * FIELD_HEIGHT - FIELD_HEIGHT / 2) * 0.8);
+    }
   });
 
   teams.right.forEach(player => {
-      const playerData = players.get(player.id);
-      if (playerData) {
-          playerData.ready = false;
-          playerData.characterType = null;
-          playerData.position = new Vector3(FIELD_WIDTH / 4, 0.5,
-              (Math.random() * FIELD_HEIGHT - FIELD_HEIGHT / 2) * 0.8);
-      }
+    const playerData = players.get(player.id);
+    if (playerData) {
+      playerData.ready = false;
+      playerData.characterType = null;
+      playerData.position = new Vector3(FIELD_WIDTH / 4, 0.5,
+        (Math.random() * FIELD_HEIGHT - FIELD_HEIGHT / 2) * 0.8);
+    }
   });
 
   // Emitir actualización completa de estado
   const gameEndData = {
-      currentState: currentGameState,
-      reason: reason,
-      finalScore,
-      goalsToWin: GOALS_TO_WIN,
-      winningTeam: winningTeam,  // Añadir explícitamente el equipo ganador
-      players: Array.from(players.values()).map(player => ({
-          id: player.id,
-          name: player.name,
-          team: player.team,
-          characterType: player.characterType,
-          ready: player.ready
-      }))
+    currentState: currentGameState,
+    reason: reason,
+    finalScore,
+    goalsToWin: GOALS_TO_WIN,
+    winningTeam: winningTeam,  // Añadir explícitamente el equipo ganador
+    players: Array.from(players.values()).map(player => ({
+      id: player.id,
+      name: player.name,
+      team: player.team,
+      characterType: player.characterType,
+      ready: player.ready
+    }))
   };
 
   io.emit('gameEnd', gameEndData);
@@ -272,14 +272,37 @@ function updateGameState() {
   }
 
   // Actualizar posiciones de jugadores
+  // En el bucle updateGameState, dentro del manejo de movimiento del jugador
   players.forEach((player) => {
     let playerVelocity = new Vector3(0, 0, 0);
     const speedMultiplier = 1;
+    const diagonalMultiplier = 0.707; // Aproximadamente 1/√2
 
-    if (player.movement.up) playerVelocity.z += PLAYER_SPEED * speedMultiplier;
-    if (player.movement.down) playerVelocity.z -= PLAYER_SPEED * speedMultiplier;
-    if (player.movement.left) playerVelocity.x -= PLAYER_SPEED * speedMultiplier;
-    if (player.movement.right) playerVelocity.x += PLAYER_SPEED * speedMultiplier;
+    // Manejo de direcciones diagonales
+    switch (player.movement.direction) {
+      case 'up-right':
+        playerVelocity.z += PLAYER_SPEED * diagonalMultiplier;
+        playerVelocity.x += PLAYER_SPEED * diagonalMultiplier;
+        break;
+      case 'up-left':
+        playerVelocity.z += PLAYER_SPEED * diagonalMultiplier;
+        playerVelocity.x -= PLAYER_SPEED * diagonalMultiplier;
+        break;
+      case 'down-right':
+        playerVelocity.z -= PLAYER_SPEED * diagonalMultiplier;
+        playerVelocity.x += PLAYER_SPEED * diagonalMultiplier;
+        break;
+      case 'down-left':
+        playerVelocity.z -= PLAYER_SPEED * diagonalMultiplier;
+        playerVelocity.x -= PLAYER_SPEED * diagonalMultiplier;
+        break;
+      default:
+        // Movimientos originales
+        if (player.movement.up) playerVelocity.z += PLAYER_SPEED;
+        if (player.movement.down) playerVelocity.z -= PLAYER_SPEED;
+        if (player.movement.left) playerVelocity.x -= PLAYER_SPEED;
+        if (player.movement.right) playerVelocity.x += PLAYER_SPEED;
+    }
 
     player.position = player.position.add(playerVelocity);
     player.velocity = playerVelocity.clone();
@@ -456,27 +479,27 @@ io.on('connection', (socket) => {
 
   socket.on('playerMoveStart', ({ direction }) => {
     if (!['up', 'down', 'left', 'right'].includes(direction)) {
-      socket.emit('error', { message: 'Dirección inválida' });
-      return;
+        socket.emit('error', { message: 'Dirección inválida' });
+        return;
     }
 
     const player = players.get(socket.id);
     if (player) {
-      player.movement[direction] = true;
+        player.movement[direction] = true;
     }
-  });
+});
 
-  socket.on('playerMoveStop', ({ direction }) => {
+socket.on('playerMoveStop', ({ direction }) => {
     if (!['up', 'down', 'left', 'right'].includes(direction)) {
-      socket.emit('error', { message: 'Dirección inválida' });
-      return;
+        socket.emit('error', { message: 'Dirección inválida' });
+        return;
     }
 
     const player = players.get(socket.id);
     if (player) {
-      player.movement[direction] = false;
+        player.movement[direction] = false;
     }
-  });
+});
 
   socket.on('chatMessage', (message) => {
     const player = players.get(socket.id);

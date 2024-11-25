@@ -58,6 +58,9 @@ const Game = () => {
     const [isMobile, setIsMobile] = useState(false);
 
 
+    const [chatExpanded, setChatExpanded] = useState(true)
+
+
     // Añadir la función handleToggleReady que faltaba:
     const handleToggleReady = useCallback(() => {
         if (socketRef.current) {
@@ -680,7 +683,6 @@ const Game = () => {
 
         // En Game.js, añadir el listener para el evento de gol
         socketRef.current.on('goalScored', ({ team, score }) => {
-            // Efecto de flash en la pantalla
             const flashScreen = new GUI.Rectangle("goalFlash");
             flashScreen.width = "100%";
             flashScreen.height = "100%";
@@ -689,51 +691,43 @@ const Game = () => {
             flashScreen.zIndex = 999;
             advancedTextureRef.current.addControl(flashScreen);
 
-            // Texto de GOL
             const goalText = new GUI.TextBlock();
             goalText.text = "¡GOL!";
             goalText.color = "white";
-            goalText.fontSize = 120;
+            goalText.fontSize = isMobile ? 80 : 120;
             goalText.fontWeight = "bold";
-            goalText.outlineWidth = 3;
+            goalText.outlineWidth = isMobile ? 2 : 3;
             goalText.outlineColor = "black";
             goalText.shadowColor = "black";
-            goalText.shadowBlur = 10;
-            goalText.shadowOffsetX = 5;
-            goalText.shadowOffsetY = 5;
+            goalText.shadowBlur = isMobile ? 5 : 10;
+            goalText.shadowOffsetX = isMobile ? 3 : 5;
+            goalText.shadowOffsetY = isMobile ? 3 : 5;
             advancedTextureRef.current.addControl(goalText);
 
-            // Texto del equipo
             const teamText = new GUI.TextBlock();
             teamText.text = team === 'left' ? "¡EQUIPO AZUL!" : "¡EQUIPO ROJO!";
             teamText.color = team === 'left' ? "#3b82f6" : "#ef4444";
-            teamText.fontSize = 60;
+            teamText.fontSize = isMobile ? 40 : 60;
             teamText.fontWeight = "bold";
-            teamText.top = "80px";
-            teamText.outlineWidth = 2;
+            teamText.top = isMobile ? "60px" : "80px";
+            teamText.outlineWidth = isMobile ? 1 : 2;
             teamText.outlineColor = "black";
             advancedTextureRef.current.addControl(teamText);
 
-            // Animación
             let scaleStep = 0;
             const scaleInterval = setInterval(() => {
                 scaleStep++;
-                goalText.scaleX = 1 + Math.sin(scaleStep * 0.2) * 0.2;
-                goalText.scaleY = 1 + Math.sin(scaleStep * 0.2) * 0.2;
-
-                if (scaleStep >= 20) {
-                    clearInterval(scaleInterval);
-                }
+                const scaleAmount = isMobile ? 0.15 : 0.2;
+                goalText.scaleX = 1 + Math.sin(scaleStep * 0.2) * scaleAmount;
+                goalText.scaleY = 1 + Math.sin(scaleStep * 0.2) * scaleAmount;
+                if (scaleStep >= 20) clearInterval(scaleInterval);
             }, 50);
 
-            // Remover elementos después de 2 segundos
             setTimeout(() => {
                 flashScreen.dispose();
                 goalText.dispose();
                 teamText.dispose();
             }, 1000);
-
-
         });
 
 
@@ -754,80 +748,71 @@ const Game = () => {
             }
 
             if (advancedTextureRef.current) {
-                // Determinar el equipo ganador de manera segura
                 const isBlueTeam = winningTeam === 'left';
                 const teamColor = isBlueTeam ? '#3b82f6' : '#ef4444';
                 const teamName = isBlueTeam ? "EQUIPO AZUL" : "EQUIPO ROJO";
 
-                // Fondo oscuro semi-transparente
                 const fullscreenBg = new GUI.Rectangle("fullscreenBg");
                 fullscreenBg.width = "100%";
                 fullscreenBg.height = "100%";
-                fullscreenBg.background = "rgba(0, 0, 0, 0.7)";
+                fullscreenBg.background = "rgba(0, 0, 0, 0.85)";
                 fullscreenBg.thickness = 0;
                 advancedTextureRef.current.addControl(fullscreenBg);
 
-                // Contenedor principal ajustado
                 const victoryMessage = new GUI.Rectangle("victoryMessage");
-                victoryMessage.width = "600px";
-                victoryMessage.height = "300px";
+                victoryMessage.width = isMobile ? "90%" : "600px";
+                victoryMessage.height = isMobile ? "250px" : "300px";
                 victoryMessage.thickness = 2;
                 victoryMessage.color = teamColor;
                 victoryMessage.background = "rgba(0, 0, 0, 0.9)";
-                victoryMessage.cornerRadius = 20;
+                victoryMessage.cornerRadius = isMobile ? 15 : 20;
                 victoryMessage.shadowColor = teamColor;
-                victoryMessage.shadowBlur = 15;
-                victoryMessage.horizontalAlignment = GUI.Control.HORIZONTAL_ALIGNMENT_CENTER;
-                victoryMessage.verticalAlignment = GUI.Control.VERTICAL_ALIGNMENT_CENTER;
+                victoryMessage.shadowBlur = isMobile ? 10 : 15;
                 advancedTextureRef.current.addControl(victoryMessage);
 
-                // Título principal ajustado
                 const titleText = new GUI.TextBlock();
                 titleText.text = "¡VICTORIA!";
                 titleText.color = teamColor;
-                titleText.fontSize = 48;
+                titleText.fontSize = isMobile ? 36 : 48;
                 titleText.fontFamily = "Arial";
                 titleText.fontWeight = "bold";
-                titleText.top = "-80px";
+                titleText.top = isMobile ? "-60px" : "-80px";
                 victoryMessage.addControl(titleText);
 
-                // Subtítulo del equipo ganador
                 const subtitleText = new GUI.TextBlock();
                 subtitleText.text = teamName;
                 subtitleText.color = teamColor;
-                subtitleText.fontSize = 36;
+                subtitleText.fontSize = isMobile ? 28 : 36;
                 subtitleText.fontFamily = "Arial";
                 subtitleText.fontWeight = "bold";
-                subtitleText.top = "-30px";
+                subtitleText.top = isMobile ? "-20px" : "-30px";
                 victoryMessage.addControl(subtitleText);
 
-                // Línea decorativa ajustada
                 const line = new GUI.Rectangle("line");
-                line.width = "400px";
+                line.width = isMobile ? "80%" : "400px";
                 line.height = "2px";
                 line.background = teamColor;
-                line.top = "10px";
+                line.top = isMobile ? "5px" : "10px";
                 victoryMessage.addControl(line);
 
-                // Score ajustado
                 if (finalScore) {
                     const scoreText = new GUI.TextBlock();
                     scoreText.text = "RESULTADO FINAL";
                     scoreText.color = "white";
-                    scoreText.fontSize = 24;
-                    scoreText.top = "40px";
+                    scoreText.fontSize = isMobile ? 20 : 24;
+                    scoreText.top = isMobile ? "30px" : "40px";
                     victoryMessage.addControl(scoreText);
 
                     const scoreNumbers = new GUI.TextBlock();
                     scoreNumbers.text = `${finalScore.left} - ${finalScore.right}`;
                     scoreNumbers.color = "white";
-                    scoreNumbers.fontSize = 64;
+                    scoreNumbers.fontSize = isMobile ? 48 : 64;
                     scoreNumbers.fontWeight = "bold";
-                    scoreNumbers.top = "90px";
+                    scoreNumbers.top = isMobile ? "70px" : "90px";
                     victoryMessage.addControl(scoreNumbers);
                 }
 
-                // Animaciones
+                // Fade animations remain the same
                 victoryMessage.alpha = 0;
                 let alpha = 0;
                 const fadeIn = setInterval(() => {
@@ -1084,16 +1069,83 @@ const Game = () => {
                 isMobile ? (
                     // Layout móvil
                     <>
-                        {/* Scoreboard */}
+                        {/* Scoreboard y status */}
                         <div style={{
                             position: 'absolute',
                             top: '8px',
                             left: '0',
                             right: '0',
                             display: 'flex',
-                            justifyContent: 'center',
+                            flexDirection: 'column',
+                            alignItems: 'center',
+                            gap: '8px',
                             zIndex: 10
                         }}>
+
+                            {/* Lista de jugadores móvil */}
+                            <div style={{
+                                position: 'absolute',
+                                top: '8px',
+                                left: '8px',
+                                backgroundColor: 'rgba(0, 0, 0, 0.6)',
+                                padding: '8px',
+                                borderRadius: '8px',
+                                fontSize: '10px',
+                                zIndex: 10
+                            }}>
+                                <div style={{
+                                    color: '#3b82f6',
+                                    marginBottom: '4px'
+                                }}>
+                                    {teams.left.map(player => (
+                                        <div key={player.id}>{player.name}</div>
+                                    ))}
+                                </div>
+                                <div style={{
+                                    color: '#ef4444'
+                                }}>
+                                    {teams.right.map(player => (
+                                        <div key={player.id}>{player.name}</div>
+                                    ))}
+                                </div>
+                            </div>
+
+
+                            {/* Status de conexión, nombre y equipo */}
+                            <div style={{
+                                position: 'absolute',
+                                right: '8px',
+                                top: '0',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '6px',
+                                zIndex: 10
+                            }}>
+                                <div style={{
+                                    backgroundColor: isConnected ? 'rgba(39, 174, 96, 0.6)' : 'rgba(231, 76, 60, 0.6)',
+                                    padding: '4px 8px',
+                                    borderRadius: '4px',
+                                    color: 'white',
+                                    fontSize: '10px'
+                                }}>
+                                    {isConnected ? '●' : '○'}
+                                </div>
+                                <div style={{
+                                    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+                                    padding: '4px 8px',
+                                    borderRadius: '4px',
+                                    fontSize: '10px',
+                                    display: 'flex',
+                                    gap: '4px'
+                                }}>
+                                    <span style={{ color: 'white' }}>{playerName}</span>
+                                    <span style={{ color: currentTeam === 'left' ? '#3b82f6' : '#ef4444' }}>
+                                        {currentTeam === 'left' ? 'Azul' : 'Rojo'}
+                                    </span>
+                                </div>
+                            </div>
+
+                            {/* Marcador */}
                             <div style={{
                                 backgroundColor: 'rgba(0, 0, 0, 0.6)',
                                 padding: '8px 16px',
@@ -1103,47 +1155,18 @@ const Game = () => {
                                 alignItems: 'center'
                             }}>
                                 <span style={{ color: '#3b82f6', fontSize: '24px' }}>
-                                    {score.left}  {/* Cambiar aquí */}
+                                    {score.left}
                                 </span>
                                 <span style={{ color: 'white', fontSize: '24px' }}>-</span>
                                 <span style={{ color: '#ef4444', fontSize: '24px' }}>
-                                    {score.right}  {/* Cambiar aquí */}
+                                    {score.right}
                                 </span>
                             </div>
                         </div>
 
-                        {/* Info del jugador */}
-                        <div style={{
-                            position: 'absolute',
-                            top: '64px',
-                            left: '8px',
-                            right: '8px',
-                            backgroundColor: 'rgba(0, 0, 0, 0.6)',
-                            padding: '8px',
-                            borderRadius: '8px',
-                            display: 'flex',
-                            justifyContent: 'space-between',
-                            alignItems: 'center',
-                            color: 'white',
-                            fontSize: '12px',
-                            zIndex: 10
-                        }}>
-                            <span>{playerName}</span>
-                            <span style={{
-                                color: currentTeam === 'left' ? '#3b82f6' : '#ef4444'
-                            }}>
-                                {currentTeam === 'left' ? 'Equipo Azul' : 'Equipo Rojo'}
-                            </span>
-                            <span style={{
-                                backgroundColor: isConnected ? 'rgba(39, 174, 96, 0.6)' : 'rgba(231, 76, 60, 0.6)',
-                                padding: '4px 8px',
-                                borderRadius: '4px'
-                            }}>
-                                {isConnected ? 'Conectado' : 'Desconectado'}
-                            </span>
-                        </div>
 
-                        {/* Instrucciones móviles - AÑADIR AQUÍ */}
+
+                        {/* Instrucciones móviles */}
                         <div style={{
                             position: 'absolute',
                             top: '120px',
@@ -1187,13 +1210,13 @@ const Game = () => {
                             </div>
                         )}
 
-                        {/*Chat minimizable móvil*/}
+                        {/* Chat minimizable móvil */}
                         <div style={{
                             position: 'fixed',
-                            bottom: isMobileChatExpanded ? '80px' : '16px', // Ajustado para no solapar con el joystick
+                            bottom: isMobileChatExpanded ? '80px' : '16px',
                             right: '16px',
-                            width: isMobileChatExpanded ? '80%' : '40px', // Más pequeño cuando está minimizado
-                            height: isMobileChatExpanded ? '200px' : '40px', // Altura fija cuando está minimizado
+                            width: isMobileChatExpanded ? '80%' : '40px',
+                            height: isMobileChatExpanded ? '200px' : '40px',
                             maxWidth: '300px',
                             backgroundColor: 'rgba(0, 0, 0, 0.6)',
                             borderRadius: '8px',
@@ -1432,93 +1455,114 @@ const Game = () => {
 
                             {/* Chat Desktop */}
                             <div style={{
-                                width: '300px',
-                                height: '250px',
+                                position: 'absolute',
+                                bottom: 10,
+                                right: 10,
+                                width: chatExpanded ? '300px' : '50px',
+                                height: chatExpanded ? '250px' : '50px',
                                 backgroundColor: 'rgba(0, 0, 0, 0.6)',
                                 borderRadius: '8px',
                                 display: 'flex',
                                 flexDirection: 'column',
+                                transition: 'all 0.3s ease',
                                 pointerEvents: 'auto'
                             }}>
-                                <div
-                                    ref={chatMessagesRef}
+                                <button
+                                    onClick={() => setChatExpanded(!chatExpanded)}
                                     style={{
-                                        flex: 1,
-                                        padding: '10px',
-                                        overflowY: 'auto',
+                                        width: '100%',
+                                        height: chatExpanded ? '30px' : '100%',
+                                        padding: '8px',
+                                        backgroundColor: 'transparent',
+                                        border: 'none',
+                                        borderBottom: chatExpanded ? '1px solid rgba(255, 255, 255, 0.1)' : 'none',
+                                        color: 'white',
+                                        cursor: 'pointer',
                                         display: 'flex',
-                                        flexDirection: 'column'
-                                    }}>
-                                    {chatMessages.map((msg, index) => (
-                                        <div
-                                            key={index}
-                                            style={{
-                                                marginBottom: '4px',
-                                                wordBreak: 'break-word',
-                                                fontSize: '14px',
-                                                color: 'white'
-                                            }}
-                                        >
-                                            <>
-                                                <strong
-                                                    style={{
-                                                        color: teams.left.find(p => p.id === msg.playerId)
-                                                            ? '#3b82f6'
-                                                            : teams.right.find(p => p.id === msg.playerId)
-                                                                ? '#ef4444'
-                                                                : '#4CAF50'
-                                                    }}
-                                                >
-                                                    {msg.playerName}:
-                                                </strong>
-                                                {' '}
-                                                <span style={{ color: 'white' }}>{msg.message}</span>
-                                            </>
-                                        </div>
-                                    ))}
-                                </div>
-                                <form
-                                    onSubmit={handleChatSubmit}
-                                    style={{
-                                        display: 'flex',
-                                        padding: '10px',
-                                        gap: '5px',
-                                        borderTop: '1px solid rgba(255, 255, 255, 0.1)'
+                                        alignItems: 'center',
+                                        justifyContent: 'center'
                                     }}
                                 >
-                                    <input
-                                        type="text"
-                                        value={chatInput}
-                                        onChange={(e) => setChatInput(e.target.value)}
-                                        onFocus={() => { chatInputFocusRef.current = true; }}
-                                        onBlur={() => { chatInputFocusRef.current = false; }}
-                                        style={{
-                                            flex: 1,
-                                            padding: '8px',
-                                            borderRadius: '4px',
-                                            border: 'none',
-                                            backgroundColor: 'rgba(255, 255, 255, 0.05)',
-                                            fontSize: '14px',
-                                            color: 'white',
-                                            outline: 'none'
-                                        }}
-                                        placeholder="Escribe un mensaje..."
-                                    />
-                                    <button
-                                        type="submit"
-                                        style={{
-                                            padding: '8px 15px',
-                                            borderRadius: '4px',
-                                            border: 'none',
-                                            backgroundColor: '#4CAF50',
-                                            color: 'white',
-                                            cursor: 'pointer',
-                                            fontSize: '14px'
-                                        }}
-                                    >
-                                        Enviar
-                                    </button>
-                                </form>
+                                    {chatExpanded ? 'Chat ▼' : '💬'}
+                                </button>
+
+                                {chatExpanded && (
+                                    <>
+                                        <div
+                                            ref={chatMessagesRef}
+                                            style={{
+                                                flex: 1,
+                                                padding: '10px',
+                                                overflowY: 'auto'
+                                            }}
+                                        >
+                                            {chatMessages.map((msg, index) => (
+                                                <div
+                                                    key={index}
+                                                    style={{
+                                                        marginBottom: '4px',
+                                                        wordBreak: 'break-word',
+                                                        fontSize: '14px',
+                                                        color: 'white'
+                                                    }}
+                                                >
+                                                    <strong
+                                                        style={{
+                                                            color: teams.left.find(p => p.id === msg.playerId)
+                                                                ? '#3b82f6'
+                                                                : teams.right.find(p => p.id === msg.playerId)
+                                                                    ? '#ef4444'
+                                                                    : '#4CAF50'
+                                                        }}
+                                                    >
+                                                        {msg.playerName}:
+                                                    </strong>{' '}
+                                                    <span>{msg.message}</span>
+                                                </div>
+                                            ))}
+                                        </div>
+                                        <form
+                                            onSubmit={handleChatSubmit}
+                                            style={{
+                                                display: 'flex',
+                                                padding: '10px',
+                                                gap: '5px',
+                                                borderTop: '1px solid rgba(255, 255, 255, 0.1)'
+                                            }}
+                                        >
+                                            <input
+                                                type="text"
+                                                value={chatInput}
+                                                onChange={(e) => setChatInput(e.target.value)}
+                                                onFocus={() => { chatInputFocusRef.current = true; }}
+                                                onBlur={() => { chatInputFocusRef.current = false; }}
+                                                style={{
+                                                    flex: 1,
+                                                    padding: '8px',
+                                                    borderRadius: '4px',
+                                                    border: 'none',
+                                                    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+                                                    fontSize: '14px',
+                                                    color: 'white'
+                                                }}
+                                                placeholder="Escribe un mensaje..."
+                                            />
+                                            <button
+                                                type="submit"
+                                                style={{
+                                                    padding: '8px 15px',
+                                                    borderRadius: '4px',
+                                                    border: 'none',
+                                                    backgroundColor: '#4CAF50',
+                                                    color: 'white',
+                                                    cursor: 'pointer'
+                                                }}
+                                            >
+                                                →
+                                            </button>
+                                        </form>
+                                    </>
+                                )}
                             </div>
                         </div>
                     </>
