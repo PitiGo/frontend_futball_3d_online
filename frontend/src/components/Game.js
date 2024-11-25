@@ -32,11 +32,13 @@ const Game = () => {
     const [isLoading, setIsLoading] = useState(true);
     const [hasJoined, setHasJoined] = useState(false);
     const [gameInProgress, setGameInProgress] = useState(false);
+    const [score, setScore] = useState({ left: 0, right: 0 });
 
     const [showingEndMessage, setShowingEndMessage] = useState(false);
 
     // Añadir nuevo estado para el personaje
     const [selectedCharacter, setSelectedCharacter] = useState(null);
+    const [currentDirection, setCurrentDirection] = useState(null);
 
     // En Game.js, añade estos nuevos estados:
     const [teamSelected, setTeamSelected] = useState(false);
@@ -77,6 +79,11 @@ const Game = () => {
     const createScene = useCallback((canvas) => {
         console.log('Creando escena de Babylon.js');
         const engine = new BABYLON.Engine(canvas, true);
+        // En el createScene
+        if (isMobile) {
+            engine.setHardwareScalingLevel(1.5); // Reducir resolución en móviles
+            engine.adaptToDeviceRatio = false;
+        }
         engineRef.current = engine;
         const scene = new BABYLON.Scene(engine);
         sceneRef.current = scene;
@@ -248,45 +255,46 @@ const Game = () => {
         // UI del marcador
         const advancedTexture = GUI.AdvancedDynamicTexture.CreateFullscreenUI('UI');
         advancedTextureRef.current = advancedTexture;
+        // Solo crear el marcador de Babylon si NO es móvil
+        if (!isMobile) {
+            const scoreBackground = new GUI.Rectangle();
+            scoreBackground.width = '300px';  // Aumentado de 200px
+            scoreBackground.height = '40px';
+            scoreBackground.cornerRadius = 20;
+            scoreBackground.color = 'White';
+            scoreBackground.thickness = 2;
+            scoreBackground.background = 'Black';
+            scoreBackground.horizontalAlignment = GUI.Control.HORIZONTAL_ALIGNMENT_CENTER;
+            scoreBackground.verticalAlignment = GUI.Control.VERTICAL_ALIGNMENT_TOP;
+            scoreBackground.top = '10px';
+            advancedTexture.addControl(scoreBackground);
 
-        const scoreBackground = new GUI.Rectangle();
-        scoreBackground.width = '300px';  // Aumentado de 200px
-        scoreBackground.height = '40px';
-        scoreBackground.cornerRadius = 20;
-        scoreBackground.color = 'White';
-        scoreBackground.thickness = 2;
-        scoreBackground.background = 'Black';
-        scoreBackground.horizontalAlignment = GUI.Control.HORIZONTAL_ALIGNMENT_CENTER;
-        scoreBackground.verticalAlignment = GUI.Control.VERTICAL_ALIGNMENT_TOP;
-        scoreBackground.top = '10px';
-        advancedTexture.addControl(scoreBackground);
+            // Marcador equipo izquierdo (Azul)
+            const leftScoreText = new GUI.TextBlock();
+            leftScoreText.text = "0";
+            leftScoreText.color = '#3b82f6';  // Azul
+            leftScoreText.fontSize = 24;
+            leftScoreText.left = "-40px";
+            scoreBackground.addControl(leftScoreText);
 
-        // Marcador equipo izquierdo (Azul)
-        const leftScoreText = new GUI.TextBlock();
-        leftScoreText.text = "0";
-        leftScoreText.color = '#3b82f6';  // Azul
-        leftScoreText.fontSize = 24;
-        leftScoreText.left = "-40px";
-        scoreBackground.addControl(leftScoreText);
+            // Separador
+            const separator = new GUI.TextBlock();
+            separator.text = "-";
+            separator.color = 'white';
+            separator.fontSize = 24;
+            scoreBackground.addControl(separator);
 
-        // Separador
-        const separator = new GUI.TextBlock();
-        separator.text = "-";
-        separator.color = 'white';
-        separator.fontSize = 24;
-        scoreBackground.addControl(separator);
+            // Marcador equipo derecho (Rojo)
+            const rightScoreText = new GUI.TextBlock();
+            rightScoreText.text = "0";
+            rightScoreText.color = '#ef4444';  // Rojo
+            rightScoreText.fontSize = 24;
+            rightScoreText.left = "40px";
+            scoreBackground.addControl(rightScoreText);
 
-        // Marcador equipo derecho (Rojo)
-        const rightScoreText = new GUI.TextBlock();
-        rightScoreText.text = "0";
-        rightScoreText.color = '#ef4444';  // Rojo
-        rightScoreText.fontSize = 24;
-        rightScoreText.left = "40px";
-        scoreBackground.addControl(rightScoreText);
-
-        // Actualizar la referencia
-        scoreTextRef.current = { left: leftScoreText, right: rightScoreText };
-
+            // Actualizar la referencia
+            scoreTextRef.current = { left: leftScoreText, right: rightScoreText };
+        }
         return scene;
     }, [isMobile]);
 
@@ -321,15 +329,15 @@ const Game = () => {
 
                         // En Game.js, cuando se crean las etiquetas de los jugadores
                         const playerLabel = new GUI.Rectangle(`label-${playerData.id}`);
-                        playerLabel.width = "120px";
-                        playerLabel.height = "30px";
+                        playerLabel.width = isMobile ? "80px" : "120px";  // Más pequeño en móvil
+                        playerLabel.height = isMobile ? "20px" : "30px";  // Más pequeño en móvil
                         playerLabel.background = playerData.team === 'left' ? "rgba(59, 130, 246, 0.8)" : "rgba(239, 68, 68, 0.8)";
-                        playerLabel.cornerRadius = 15;
+                        playerLabel.cornerRadius = isMobile ? 10 : 15;
                         playerLabel.thickness = 1;
                         playerLabel.color = "white";
                         playerLabel.isPointerBlocker = false;
 
-                        const scale = isMobile ? 0.7 : 1; // Reducir tamaño en móvil
+                        const scale = isMobile ? 0.5 : 1; // Reducir tamaño en móvil
                         playerLabel.scaling = new BABYLON.Vector3(scale, scale, scale);
 
 
@@ -339,7 +347,7 @@ const Game = () => {
                         const nameText = new GUI.TextBlock();
                         nameText.text = playerData.name;
                         nameText.color = "white";
-                        nameText.fontSize = 14;
+                        nameText.fontSize = isMobile ? 10 : 14;
                         nameText.fontWeight = "bold";
                         nameText.fontFamily = "Arial";
                         nameText.textHorizontalAlignment = GUI.Control.HORIZONTAL_ALIGNMENT_CENTER;
@@ -347,7 +355,7 @@ const Game = () => {
                         playerLabel.addControl(nameText);
 
                         playerLabel.linkWithMesh(playerInstance);
-                        playerLabel.linkOffsetY = -170;
+                        playerLabel.linkOffsetY = isMobile ? -80 : -170;;
                         playerLabel.zIndex = 1;
 
                         playersLabelsRef.current[playerData.id] = playerLabel;
@@ -511,11 +519,11 @@ const Game = () => {
         window.addEventListener('resize', handleResize);
 
         console.log('Intentando conectar al servidor...');
-        socketRef.current = io('http://localhost:4000', { transports: ['websocket'] });
+        //socketRef.current = io('http://localhost:4000', { transports: ['websocket'] });
         // Nueva línea en Game.js
-        /*  socketRef.current = io('https://football-online-3d.dantecollazzi.com', {
-             transports: ['websocket']
-         }); */
+        socketRef.current = io('https://football-online-3d.dantecollazzi.com', {
+            transports: ['websocket']
+        });
 
         socketRef.current.on('connect', () => {
             console.log('Conectado al servidor con Socket ID:', socketRef.current.id);
@@ -523,9 +531,19 @@ const Game = () => {
         });
 
         socketRef.current.on('gameStateUpdate', (gameState) => {
-            //  console.log('Estado del juego recibido:', gameState);
+            if (gameState.score) {
+                setScore(gameState.score);
+            }
+
+            // Agregar log para verificar el estado de animación
+            const localPlayer = gameState.players?.find(p => p.id === socketRef.current.id);
+            if (localPlayer) {
+                console.log('Estado de movimiento:', localPlayer.isMoving);
+            }
+
             updateGameState(gameState);
         });
+
 
         socketRef.current.on('playersListUpdate', (playersList) => {
             console.log('Lista de jugadores actualizada:', playersList);
@@ -620,19 +638,23 @@ const Game = () => {
 
                     // Crear etiqueta del jugador
                     const playerLabel = new GUI.Rectangle(`label-${id}`);
-                    playerLabel.width = "120px";
-                    playerLabel.height = "30px";
+                    playerLabel.width = isMobile ? "80px" : "120px";
+                    playerLabel.height = isMobile ? "20px" : "30px";
                     playerLabel.background = team === 'left' ? "rgba(59, 130, 246, 0.8)" : "rgba(239, 68, 68, 0.8)";
-                    playerLabel.cornerRadius = 15;
+                    playerLabel.cornerRadius = isMobile ? 10 : 15;
                     playerLabel.thickness = 1;
                     playerLabel.color = "white";
                     playerLabel.isPointerBlocker = false;
+
+                    const scale = isMobile ? 0.5 : 1;
+                    playerLabel.scaling = new BABYLON.Vector3(scale, scale, scale);
+
                     advancedTextureRef.current.addControl(playerLabel);
 
                     const nameText = new GUI.TextBlock();
                     nameText.text = name;
                     nameText.color = "white";
-                    nameText.fontSize = 14;
+                    nameText.fontSize = isMobile ? 10 : 14;
                     nameText.fontWeight = "bold";
                     nameText.fontFamily = "Arial";
                     nameText.textHorizontalAlignment = GUI.Control.HORIZONTAL_ALIGNMENT_CENTER;
@@ -640,7 +662,7 @@ const Game = () => {
                     playerLabel.addControl(nameText);
 
                     playerLabel.linkWithMesh(playerInstance);
-                    playerLabel.linkOffsetY = -170;
+                    playerLabel.linkOffsetY = isMobile ? -80 : -170;
                     playerLabel.zIndex = 1;
 
                     playersLabelsRef.current[id] = playerLabel;
@@ -837,32 +859,25 @@ const Game = () => {
         });
 
         const handleKeyDown = (event) => {
-
-
-
-            if (chatInputFocusRef.current || isMobile) { // Añadir verificación de isMobile
+            if (chatInputFocusRef.current || isMobile) {
                 return;
             }
 
-            if (chatInputFocusRef.current) {
-                // Si el chat está enfocado, no procesar el evento para el juego
-                return;
-            }
             let direction = null;
-            switch (event.key) {
-                case "ArrowUp":
+            switch (event.key.toLowerCase()) { // Añadir toLowerCase()
+                case "arrowup":
                 case "w":
                     direction = "up";
                     break;
-                case "ArrowDown":
+                case "arrowdown":
                 case "s":
                     direction = "down";
                     break;
-                case "ArrowLeft":
+                case "arrowleft":
                 case "a":
                     direction = "left";
                     break;
-                case "ArrowRight":
+                case "arrowright":
                 case "d":
                     direction = "right";
                     break;
@@ -870,36 +885,30 @@ const Game = () => {
                     break;
             }
             if (direction && socketRef.current) {
-                console.log(`Enviando inicio de movimiento: ${direction}`);
-                socketRef.current.emit('playerMoveStart', { direction });
+                socketRef.current.volatile.emit('playerMoveStart', { direction });
             }
         };
 
         const handleKeyUp = (event) => {
-
-            if (chatInputFocusRef.current || isMobile) { // Añadir verificación de isMobile
+            if (chatInputFocusRef.current || isMobile) {
                 return;
             }
 
-            if (chatInputFocusRef.current) {
-                // Si el chat está enfocado, no procesar el evento para el juego
-                return;
-            }
             let direction = null;
-            switch (event.key) {
-                case "ArrowUp":
+            switch (event.key.toLowerCase()) { // Añadir toLowerCase()
+                case "arrowup":
                 case "w":
                     direction = "up";
                     break;
-                case "ArrowDown":
+                case "arrowdown":
                 case "s":
                     direction = "down";
                     break;
-                case "ArrowLeft":
+                case "arrowleft":
                 case "a":
                     direction = "left";
                     break;
-                case "ArrowRight":
+                case "arrowright":
                 case "d":
                     direction = "right";
                     break;
@@ -907,13 +916,35 @@ const Game = () => {
                     break;
             }
             if (direction && socketRef.current) {
-                console.log(`Enviando detención de movimiento: ${direction}`);
-                socketRef.current.emit('playerMoveStop', { direction });
+                socketRef.current.volatile.emit('playerMoveStop', { direction });
+            }
+        };
+
+
+        // Agregar manejador para cuando la ventana pierde el foco
+        const handleBlur = () => {
+            if (isMobile && socketRef.current) {
+                // Detener todos los movimientos cuando la ventana pierde el foco
+                ['up', 'down', 'left', 'right'].forEach(direction => {
+                    socketRef.current.volatile.emit('playerMoveStop', { direction });
+                });
+            }
+        };
+
+        // Agregar manejador para cuando el dispositivo cambia de orientación
+        const handleOrientationChange = () => {
+            if (isMobile && socketRef.current) {
+                // Detener todos los movimientos cuando el dispositivo rota
+                ['up', 'down', 'left', 'right'].forEach(direction => {
+                    socketRef.current.volatile.emit('playerMoveStop', { direction });
+                });
             }
         };
 
         window.addEventListener('keydown', handleKeyDown);
         window.addEventListener('keyup', handleKeyUp);
+        window.addEventListener('blur', handleBlur);
+        window.addEventListener('orientationchange', handleOrientationChange);;
 
         return () => {
             if (characterManagerRef.current) {
@@ -928,6 +959,8 @@ const Game = () => {
             window.removeEventListener('resize', handleResize);
             window.removeEventListener('keydown', handleKeyDown);
             window.removeEventListener('keyup', handleKeyUp);
+            window.removeEventListener('blur', handleBlur);
+            window.removeEventListener('orientationchange', handleOrientationChange);
         };
     }, [createScene, updateGameState]);
 
@@ -939,6 +972,24 @@ const Game = () => {
         checkMobile();
         window.addEventListener('resize', checkMobile);
         return () => window.removeEventListener('resize', checkMobile);
+    }, []);
+
+    // Añadir también un useEffect para manejar la visibilidad de la página
+    useEffect(() => {
+        const handleVisibilityChange = () => {
+            if (document.hidden && socketRef.current) {
+                // Detener todos los movimientos cuando la página no está visible
+                ['up', 'down', 'left', 'right'].forEach(direction => {
+                    socketRef.current.volatile.emit('playerMoveStop', { direction });
+                });
+            }
+        };
+
+        document.addEventListener('visibilitychange', handleVisibilityChange);
+
+        return () => {
+            document.removeEventListener('visibilitychange', handleVisibilityChange);
+        };
     }, []);
 
     // Añadir este useEffect después de los otros
@@ -957,18 +1008,24 @@ const Game = () => {
     };
 
     // Modificar la gestión de movimiento para soportar controles táctiles
-    const handleDirectionChange = (direction) => {
-        if (socketRef.current) {
-            if (direction) {
-                socketRef.current.emit('playerMoveStart', { direction });
-            } else {
-                // Detener todos los movimientos cuando se suelta el joystick
-                ['up', 'down', 'left', 'right'].forEach(dir => {
-                    socketRef.current.emit('playerMoveStop', { direction: dir });
-                });
-            }
+    const handleDirectionChange = useCallback((direction) => {
+        if (!socketRef.current) return;
+
+        // Detener inmediatamente la dirección anterior
+        if (currentDirection && direction !== currentDirection) {
+            socketRef.current.volatile.emit('playerMoveStop', {
+                direction: currentDirection
+            });
         }
-    };
+
+        // Iniciar inmediatamente la nueva dirección
+        if (direction) {
+            socketRef.current.volatile.emit('playerMoveStart', { direction });
+        }
+
+        setCurrentDirection(direction);
+    }, [currentDirection]);
+
 
     return (
         <div style={{
@@ -1046,11 +1103,11 @@ const Game = () => {
                                 alignItems: 'center'
                             }}>
                                 <span style={{ color: '#3b82f6', fontSize: '24px' }}>
-                                    {scoreTextRef.current?.left.text || '0'}
+                                    {score.left}  {/* Cambiar aquí */}
                                 </span>
                                 <span style={{ color: 'white', fontSize: '24px' }}>-</span>
                                 <span style={{ color: '#ef4444', fontSize: '24px' }}>
-                                    {scoreTextRef.current?.right.text || '0'}
+                                    {score.right}  {/* Cambiar aquí */}
                                 </span>
                             </div>
                         </div>
@@ -1107,16 +1164,28 @@ const Game = () => {
                         </div>
 
                         {/* Joystick */}
-                        <div style={{
-                            position: 'fixed',
-                            bottom: '16px',
-                            left: '50%', // Centrado horizontalmente
-                            transform: 'translateX(-50%)', // Centrado horizontalmente
-                            touchAction: 'none',
-                            zIndex: 20
-                        }}>
-                            <MobileJoystick onDirectionChange={handleDirectionChange} />
-                        </div>
+                        {gameStarted && (
+                            <div style={{
+                                position: 'fixed',
+                                bottom: '40px',
+                                left: '50%',
+                                transform: 'translateX(-50%)',
+                                touchAction: 'none',
+                                zIndex: 20,
+                                width: '180px',
+                                height: '180px',
+                                display: 'flex',
+                                justifyContent: 'center',
+                                alignItems: 'center'
+                            }}>
+                                <MobileJoystick
+                                    onDirectionChange={(direction) => {
+                                        console.log('Dirección:', direction);
+                                        handleDirectionChange(direction);
+                                    }}
+                                />
+                            </div>
+                        )}
 
                         {/*Chat minimizable móvil*/}
                         <div style={{
