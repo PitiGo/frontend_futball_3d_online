@@ -522,11 +522,11 @@ const Game = () => {
         window.addEventListener('resize', handleResize);
 
         console.log('Intentando conectar al servidor...');
-        //socketRef.current = io('http://localhost:4000', { transports: ['websocket'] });
-        // Nueva línea en Game.js
-        socketRef.current = io('https://football-online-3d.dantecollazzi.com', {
+
+
+        socketRef.current = io(process.env.REACT_APP_SERVER_URL, {
             transports: ['websocket']
-        });
+          });
 
         socketRef.current.on('connect', () => {
             console.log('Conectado al servidor con Socket ID:', socketRef.current.id);
