@@ -6,15 +6,15 @@ class CharacterManager {
         this.scene = scene;
         this.charactersData = {
             player: {
-                modelPath: '/models/player.glb',
+                modelPath: '/models/conejo.glb',
                 animations: {
                     idle: 'idle',
                     running: 'running',
                     dancing: 'dancing'
                 },
                 scale: 0.014,
-                name: 'Futbolista',
-                description: 'Jugador profesional con habilidades equilibradas'
+                name: 'Conejo',
+                description: 'El jugador más rápido del campo'
             },
             pig: {
                 modelPath: '/models/elvis.glb',
@@ -24,19 +24,19 @@ class CharacterManager {
                     dancing: 'dancing'
                 },
                 scale: 0.014,
-                name: 'Elvis',
+                name: 'Cerdo',
                 description: 'Vieja gloria del Rock reconvertido a futbolista, ¡no lo subestimes!'
             },
-            croc: {
-                modelPath: '/models/marley.glb',
+            lizard: {
+                modelPath: '/models/lizard.glb',
                 animations: {
                     idle: 'idle',
                     running: 'running',
                     dancing: 'dancing'
                 },
                 scale: 0.013,
-                name: 'Marley',
-                description: 'Fuerte y resistente, domina el campo'
+                name: 'Lizard',
+                description: 'Agil'
             },
             turtle: {
                 modelPath: '/models/turtle.glb',

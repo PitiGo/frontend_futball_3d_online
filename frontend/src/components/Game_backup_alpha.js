@@ -248,10 +248,10 @@ const Game = () => {
         scoreBackground.top = '10px';
         advancedTexture.addControl(scoreBackground);
 
-        // Marcador equipo izquierdo (Azul)
+        // Marcador equipo izquierdo (Mamíferos)
         const leftScoreText = new GUI.TextBlock();
         leftScoreText.text = "0";
-        leftScoreText.color = '#3b82f6';  // Azul
+        leftScoreText.color = '#3b82f6';  // Mamíferos
         leftScoreText.fontSize = 24;
         leftScoreText.left = "-40px";
         scoreBackground.addControl(leftScoreText);
@@ -263,10 +263,10 @@ const Game = () => {
         separator.fontSize = 24;
         scoreBackground.addControl(separator);
 
-        // Marcador equipo derecho (Rojo)
+        // Marcador equipo derecho (Reptiles)
         const rightScoreText = new GUI.TextBlock();
         rightScoreText.text = "0";
-        rightScoreText.color = '#ef4444';  // Rojo
+        rightScoreText.color = '#ef4444';  // Reptiles
         rightScoreText.fontSize = 24;
         rightScoreText.left = "40px";
         scoreBackground.addControl(rightScoreText);
@@ -491,8 +491,8 @@ const Game = () => {
         console.log('Intentando conectar al servidor...');
         // socketRef.current = io('http://localhost:4000', { transports: ['websocket'] });
         // Nueva línea en Game.js
-        socketRef.current = io('https://football-online-3d.dantecollazzi.com', { 
-            transports: ['websocket'] 
+        socketRef.current = io('https://football-online-3d.dantecollazzi.com', {
+            transports: ['websocket']
         });
 
         socketRef.current.on('connect', () => {
@@ -713,7 +713,7 @@ const Game = () => {
                 // Determinar el equipo ganador de manera segura
                 const isBlueTeam = winningTeam === 'left';
                 const teamColor = isBlueTeam ? '#3b82f6' : '#ef4444';
-                const teamName = isBlueTeam ? "EQUIPO AZUL" : "EQUIPO ROJO";
+                const teamName = isBlueTeam ? "EQUIPO MAMÍFEROS" : "EQUIPO REPTILES";
 
                 // Fondo oscuro semi-transparente
                 const fullscreenBg = new GUI.Rectangle("fullscreenBg");
@@ -988,13 +988,13 @@ const Game = () => {
                             pointerEvents: 'auto'
                         }}>
                             <h3 style={{ margin: '0 0 8px 0' }}>Jugadores</h3>
-                            {/* Equipo Azul */}
+                            {/* Equipo Mamíferos */}
                             <div style={{ marginBottom: '10px' }}>
                                 <h4 style={{
                                     margin: '0 0 4px 0',
-                                    color: '#3b82f6' // Azul para equipo izquierdo
+                                    color: '#3b82f6' // Mamíferos para equipo izquierdo
                                 }}>
-                                    Equipo Azul
+                                    Equipo Mamíferos
                                 </h4>
                                 <ul style={{
                                     listStyleType: 'none',
@@ -1008,13 +1008,13 @@ const Game = () => {
                                     ))}
                                 </ul>
                             </div>
-                            {/* Equipo Rojo */}
+                            {/* Equipo Reptiles */}
                             <div>
                                 <h4 style={{
                                     margin: '0 0 4px 0',
-                                    color: '#ef4444' // Rojo para equipo derecho
+                                    color: '#ef4444' // Reptiles para equipo derecho
                                 }}>
-                                    Equipo Rojo
+                                    Equipo Reptiles
                                 </h4>
                                 <ul style={{
                                     listStyleType: 'none',
@@ -1077,7 +1077,7 @@ const Game = () => {
                                     marginLeft: '8px',
                                     color: currentTeam === 'left' ? '#3b82f6' : '#ef4444'
                                 }}>
-                                    ({currentTeam === 'left' ? 'Equipo Azul' : 'Equipo Rojo'})
+                                    ({currentTeam === 'left' ? 'Equipo Mamíferos' : 'Equipo Reptiles'})
                                 </span>
                             </div>
                             <div style={{

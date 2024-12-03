@@ -13,17 +13,19 @@ const TeamSelectionScreen = ({
 }) => {
   const maxPlayersPerTeam = 3;
 
+  // Definición de los personajes disponibles para cada equipo
   const teamCharacters = {
     left: [
-      { id: 'player', name: 'Futbolista', description: 'Jugador equilibrado' },
-      { id: 'pig', name: 'Elvis', description: 'Vieja gloria del Rock' }
+      { id: 'player', name: 'Conejo', description: 'Jugador equilibrado' },
+      { id: 'pig', name: 'Cerdo', description: 'Vieja gloria del Rock' }
     ],
     right: [
-      { id: 'turtle', name: 'Cool Girl', description: 'Jugador equilibrado' },
-      { id: 'croc', name: 'Marley', description: 'Fuerte y resistente' }
+      { id: 'turtle', name: 'Tortuga', description: 'Jugador equilibrado' },
+      { id: 'lizard', name: 'Lagarto', description: 'Fuerte y resistente' }
     ]
   };
 
+  // Manejo de partida en curso
   if (gameInProgress) {
     return (
       <div style={{
@@ -72,6 +74,7 @@ const TeamSelectionScreen = ({
     );
   }
 
+  // Funciones auxiliares para manejar estados de los jugadores
   const getReadyStatus = (team, playerId) => {
     if (!team || !playerId) return false;
     if (!readyState || !readyState[team]) return false;
@@ -100,7 +103,7 @@ const TeamSelectionScreen = ({
   const playerTeam = getPlayerTeam();
   const playerId = getCurrentPlayerId();
 
-  const getTeamName = (team) => team === 'left' ? 'Azul' : 'Rojo';
+  const getTeamName = (team) => team === 'left' ? 'Mamíferos' : 'Reptiles';
   const getTeamColor = (team) => team === 'left' ? '#3b82f6' : '#ef4444';
 
   return (
@@ -123,20 +126,47 @@ const TeamSelectionScreen = ({
         maxHeight: '95vh',
         overflowY: 'auto',
       }}>
-        <h2 style={{
+        {/* Nueva sección: Imagen y título */}
+        <div style={{
           textAlign: 'center',
-          marginTop: 0,
-          marginBottom: '1rem',
-          color: '#1f2937',
-          fontSize: '1.5rem',
-          fontWeight: 'bold',
+          marginBottom: '2rem',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          gap: '1rem'
         }}>
-          {!currentTeam
-            ? 'Selecciona tu Equipo'
-            : !selectedCharacter
-              ? `Selecciona tu Personaje - ${getTeamName(currentTeam)}`
-              : 'Prepárate para jugar'}
-        </h2>
+          {/* La imagen solo se muestra si no se ha seleccionado equipo */}
+          {!currentTeam && (
+            <img
+              src="/mamvsreptiles.webp"
+              alt="Mamíferos vs Reptiles"
+              style={{
+                maxWidth: '400px',
+                width: '100%',
+                height: 'auto',
+                borderRadius: '12px',
+                boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)',
+                animation: 'fadeIn 0.5s ease-out'
+              }}
+            />
+          )}
+
+          <h2 style={{
+            textAlign: 'center',
+            margin: 0,
+            color: '#1f2937',
+            fontSize: '1.5rem',
+            fontWeight: 'bold',
+          }}>
+            {!currentTeam
+              ? 'Selecciona tu Equipo'
+              : !selectedCharacter
+                ? `Selecciona tu Personaje - ${getTeamName(currentTeam)}`
+                : 'Prepárate para jugar'}
+          </h2>
+        </div>
+
+        {/* Contenido existente */}
         <div style={{
           display: 'flex',
           flexDirection: 'column',
@@ -164,7 +194,7 @@ const TeamSelectionScreen = ({
                 marginBottom: '0.5rem',
                 fontSize: '1rem',
               }}>
-                Equipo Azul ({teams?.left?.length || 0}/{maxPlayersPerTeam})
+                Equipo Mamíferos ({teams?.left?.length || 0}/{maxPlayersPerTeam})
               </div>
               <div style={{
                 backgroundColor: 'white',
@@ -244,12 +274,12 @@ const TeamSelectionScreen = ({
                     transition: 'all 0.2s ease',
                   }}
                 >
-                  Unirse a Azul
+                  Unirse a Mamíferos
                 </button>
               )}
             </div>
 
-            {/* Equipo Rojo */}
+            {/* Equipo Reptiles */}
             <div style={{
               backgroundColor: '#f8fafc',
               padding: '1rem',
@@ -265,7 +295,7 @@ const TeamSelectionScreen = ({
                 marginBottom: '0.5rem',
                 fontSize: '1rem',
               }}>
-                Equipo Rojo ({teams?.right?.length || 0}/{maxPlayersPerTeam})
+                Equipo Reptiles ({teams?.right?.length || 0}/{maxPlayersPerTeam})
               </div>
               <div style={{
                 backgroundColor: 'white',
@@ -345,7 +375,7 @@ const TeamSelectionScreen = ({
                     transition: 'all 0.2s ease',
                   }}
                 >
-                  Unirse a Rojo
+                  Unirse a Reptiles
                 </button>
               )}
             </div>
@@ -475,12 +505,18 @@ const TeamSelectionScreen = ({
           </div>
         </div>
 
-        {/* Estilos CSS adicionales */}
+        {/* Estilos CSS */}
         <style>
           {`
             @keyframes fadeIn {
-              from { opacity: 0; transform: translateY(10px); }
-              to { opacity: 1; transform: translateY(0); }
+              from { 
+                opacity: 0;
+                transform: translateY(-20px);
+              }
+              to { 
+                opacity: 1;
+                transform: translateY(0);
+              }
             }
 
             button:not(:disabled):hover {

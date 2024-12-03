@@ -53,6 +53,8 @@ const Game = () => {
     // Añadir nueva referencia para el CharacterManager
     const characterManagerRef = useRef(null);
 
+    const controlEffectsRef = useRef(null);
+
 
     // Añadir detección de dispositivo móvil
     const [isMobile, setIsMobile] = useState(false);
@@ -78,6 +80,123 @@ const Game = () => {
     const [chatVisible, setChatVisible] = useState(false);
     const [isMobileChatExpanded, setIsMobileChatExpanded] = useState(false);
 
+    const createControlEffect = (scene, advancedTexture) => {
+        // Crear un anillo alrededor del jugador
+        const controlRing = BABYLON.MeshBuilder.CreateTorus("controlRing", {
+            diameter: 3,
+            thickness: 0.2,
+            tessellation: 32
+        }, scene);
+
+        const ringMaterial = new BABYLON.StandardMaterial("ringMaterial", scene);
+        ringMaterial.emissiveColor = new BABYLON.Color3(0.3, 0.8, 1);
+        ringMaterial.alpha = 0.6;
+        controlRing.material = ringMaterial;
+        controlRing.isVisible = false;
+
+        // Crear un sistema de partículas personalizado usando esferas pequeñas
+        const particles = [];
+        const maxParticles = 20;
+
+        for (let i = 0; i < maxParticles; i++) {
+            const particle = BABYLON.MeshBuilder.CreateSphere("particle" + i, {
+                diameter: 0.1,
+                segments: 8
+            }, scene);
+
+            const particleMaterial = new BABYLON.StandardMaterial("particleMat" + i, scene);
+            particleMaterial.emissiveColor = new BABYLON.Color3(0.3, 0.8, 1);
+            particleMaterial.alpha = 0.6;
+            particle.material = particleMaterial;
+            particle.isVisible = false;
+
+            // Agregar propiedades de animación
+            particle.life = 0;
+            particle.maxLife = 0.5 + Math.random() * 0.5; // Entre 0.5 y 1 segundo
+            particle.velocity = new BABYLON.Vector3(0, 0, 0);
+
+            particles.push(particle);
+        }
+
+        // Función para animar las partículas
+        const animateParticles = (ballPosition) => {
+            particles.forEach(particle => {
+                if (particle.life > 0) {
+                    // Actualizar posición
+                    particle.position.addInPlace(particle.velocity);
+
+                    // Actualizar vida y opacidad
+                    particle.life -= scene.getEngine().getDeltaTime() / 1000;
+                    particle.material.alpha = (particle.life / particle.maxLife) * 0.6;
+
+                    if (particle.life <= 0) {
+                        particle.isVisible = false;
+                    }
+                } else if (Math.random() < 0.1) { // Probabilidad de emisión
+                    // Reiniciar partícula
+                    const angle = Math.random() * Math.PI * 2;
+                    const radius = 0.5;
+
+                    particle.position = new BABYLON.Vector3(
+                        ballPosition.x + Math.cos(angle) * radius,
+                        ballPosition.y,
+                        ballPosition.z + Math.sin(angle) * radius
+                    );
+
+                    particle.velocity = new BABYLON.Vector3(
+                        (Math.random() - 0.5) * 0.1,
+                        0.05,
+                        (Math.random() - 0.5) * 0.1
+                    );
+
+                    particle.life = particle.maxLife;
+                    particle.isVisible = true;
+                    particle.material.alpha = 0.6;
+                }
+            });
+        };
+
+        // Detener animación
+        const stopParticles = () => {
+            particles.forEach(particle => {
+                particle.isVisible = false;
+                particle.life = 0;
+            });
+        };
+
+        // Texto flotante para el tiempo de control
+        const controlTimeText = new GUI.TextBlock();
+        controlTimeText.text = "";
+        controlTimeText.color = "white";
+        controlTimeText.fontSize = 14;
+        controlTimeText.fontWeight = "bold";
+        controlTimeText.isVisible = false;
+        advancedTexture.addControl(controlTimeText);
+
+        // Crear un halo alrededor del balón
+        const ballHalo = BABYLON.MeshBuilder.CreateTorus("ballHalo", {
+            diameter: 1.2,
+            thickness: 0.1,
+            tessellation: 32
+        }, scene);
+
+        const haloMaterial = new BABYLON.StandardMaterial("haloMaterial", scene);
+        haloMaterial.emissiveColor = new BABYLON.Color3(0.3, 0.8, 1);
+        haloMaterial.alpha = 0.4;
+        ballHalo.material = haloMaterial;
+        ballHalo.isVisible = false;
+
+        return {
+            controlRing,
+            animateParticles,
+            stopParticles,
+            controlTimeText,
+            ballHalo,
+            particles // Necesario para la limpieza
+        };
+    };
+
+
 
     const createScene = useCallback((canvas) => {
         console.log('Creando escena de Babylon.js');
@@ -100,7 +219,7 @@ const Game = () => {
                 await Promise.all([
                     characterManagerRef.current.loadCharacter('player'),
                     characterManagerRef.current.loadCharacter('pig'),
-                    characterManagerRef.current.loadCharacter('croc'),
+                    characterManagerRef.current.loadCharacter('lizard'),
                     characterManagerRef.current.loadCharacter('turtle')
                 ]);
                 console.log('Todos los modelos cargados exitosamente');
@@ -216,6 +335,9 @@ const Game = () => {
         ball.position.y = 0.5;
         ballRef.current = ball;
 
+
+
+
         // Crear porterías
         const createGoal = (position) => {
             const goalFrame = new BABYLON.TransformNode("goalFrame", scene);
@@ -258,6 +380,11 @@ const Game = () => {
         // UI del marcador
         const advancedTexture = GUI.AdvancedDynamicTexture.CreateFullscreenUI('UI');
         advancedTextureRef.current = advancedTexture;
+
+        // Inicializar los efectos de control después de crear la textura
+        controlEffectsRef.current = createControlEffect(scene, advancedTexture);
+
+
         // Solo crear el marcador de Babylon si NO es móvil
         if (!isMobile) {
             const scoreBackground = new GUI.Rectangle();
@@ -272,10 +399,10 @@ const Game = () => {
             scoreBackground.top = '10px';
             advancedTexture.addControl(scoreBackground);
 
-            // Marcador equipo izquierdo (Azul)
+            // Marcador equipo izquierdo (Mamíferos)
             const leftScoreText = new GUI.TextBlock();
             leftScoreText.text = "0";
-            leftScoreText.color = '#3b82f6';  // Azul
+            leftScoreText.color = '#3b82f6';  // Mamíferos
             leftScoreText.fontSize = 24;
             leftScoreText.left = "-40px";
             scoreBackground.addControl(leftScoreText);
@@ -287,10 +414,10 @@ const Game = () => {
             separator.fontSize = 24;
             scoreBackground.addControl(separator);
 
-            // Marcador equipo derecho (Rojo)
+            // Marcador equipo derecho (Reptiles)
             const rightScoreText = new GUI.TextBlock();
             rightScoreText.text = "0";
-            rightScoreText.color = '#ef4444';  // Rojo
+            rightScoreText.color = '#ef4444';  // Reptiles
             rightScoreText.fontSize = 24;
             rightScoreText.left = "40px";
             scoreBackground.addControl(rightScoreText);
@@ -298,6 +425,22 @@ const Game = () => {
             // Actualizar la referencia
             scoreTextRef.current = { left: leftScoreText, right: rightScoreText };
         }
+
+        sceneRef.current.registerBeforeRender(() => {
+            if (ballRef.current && controlEffectsRef.current) {
+                // Actualizar posición del halo
+                controlEffectsRef.current.ballHalo.position = ballRef.current.position.clone();
+                controlEffectsRef.current.ballHalo.rotation.y += 0.02; // Rotación suave
+
+                // Animar partículas si están visibles
+                if (controlEffectsRef.current.ballHalo.isVisible) {
+                    controlEffectsRef.current.animateParticles(ballRef.current.position);
+                }
+            }
+        });
+
+        controlEffectsRef.current = createControlEffect(scene, advancedTexture);
+
         return scene;
     }, [isMobile]);
 
@@ -522,11 +665,16 @@ const Game = () => {
         window.addEventListener('resize', handleResize);
 
         console.log('Intentando conectar al servidor...');
+        socketRef.current = io('http://localhost:4000', { transports: ['websocket'] });
+        // Nueva línea en Game.js
+        /*  socketRef.current = io('https://football-online-3d.dantecollazzi.com', {
+              transports: ['websocket']
+          });    */
 
 
-        socketRef.current = io(process.env.REACT_APP_SERVER_URL, {
-            transports: ['websocket']
-          });
+        /*         socketRef.current = io(process.env.REACT_APP_SERVER_URL, {
+                    transports: ['websocket']
+                  }); */
 
         socketRef.current.on('connect', () => {
             console.log('Conectado al servidor con Socket ID:', socketRef.current.id);
@@ -545,6 +693,40 @@ const Game = () => {
             }
 
             updateGameState(gameState);
+
+
+            // Actualizar efectos visuales de control
+            gameState.players.forEach(player => {
+                if (player.isControllingBall) {
+                    const playerMesh = playersRef.current[player.id];
+                    if (playerMesh && controlEffectsRef.current) {
+                        // Actualizar posición del anillo
+                        controlEffectsRef.current.controlRing.position = playerMesh.position.clone();
+                        controlEffectsRef.current.controlRing.position.y = 0.1;
+                        controlEffectsRef.current.controlRing.isVisible = true;
+
+                        // Mostrar halo alrededor del balón
+                        controlEffectsRef.current.ballHalo.isVisible = true;
+
+                        // Actualizar tiempo de control
+                        const controlDuration = (Date.now() - player.ballControlTime) / 1000;
+                        const timeLeft = Math.max(0, 3 - controlDuration).toFixed(1);
+                        controlEffectsRef.current.controlTimeText.text = `${timeLeft}s`;
+                        controlEffectsRef.current.controlTimeText.linkWithMesh(playerMesh);
+                        controlEffectsRef.current.controlTimeText.linkOffsetY = -100;
+                        controlEffectsRef.current.controlTimeText.isVisible = true;
+                    }
+                }
+            });
+
+            // Ocultar efectos si nadie está controlando
+            if (!gameState.players.some(p => p.isControllingBall) && controlEffectsRef.current) {
+                controlEffectsRef.current.controlRing.isVisible = false;
+                controlEffectsRef.current.controlTimeText.isVisible = false;
+                controlEffectsRef.current.ballHalo.isVisible = false;
+                controlEffectsRef.current.stopParticles();
+            }
+
         });
 
 
@@ -705,7 +887,7 @@ const Game = () => {
             advancedTextureRef.current.addControl(goalText);
 
             const teamText = new GUI.TextBlock();
-            teamText.text = team === 'left' ? "¡EQUIPO AZUL!" : "¡EQUIPO ROJO!";
+            teamText.text = team === 'left' ? "¡EQUIPO MAMÍFEROS!" : "¡EQUIPO REPTILES!";
             teamText.color = team === 'left' ? "#3b82f6" : "#ef4444";
             teamText.fontSize = isMobile ? 40 : 60;
             teamText.fontWeight = "bold";
@@ -750,7 +932,7 @@ const Game = () => {
             if (advancedTextureRef.current) {
                 const isBlueTeam = winningTeam === 'left';
                 const teamColor = isBlueTeam ? '#3b82f6' : '#ef4444';
-                const teamName = isBlueTeam ? "EQUIPO AZUL" : "EQUIPO ROJO";
+                const teamName = isBlueTeam ? "EQUIPO MAMÍFEROS" : "EQUIPO REPTILES";
 
                 const fullscreenBg = new GUI.Rectangle("fullscreenBg");
                 fullscreenBg.width = "100%";
@@ -848,6 +1030,9 @@ const Game = () => {
                 return;
             }
 
+
+            console.log("Key pressed:", event.key);
+
             let direction = null;
             switch (event.key.toLowerCase()) { // Añadir toLowerCase()
                 case "arrowup":
@@ -865,6 +1050,12 @@ const Game = () => {
                 case "arrowright":
                 case "d":
                     direction = "right";
+                    break;
+                case " ":
+                    console.log("Iniciando control del balón - Tecla espacio presionada");
+                    if (!event.repeat) { // Evitar repetición al mantener presionado
+                        socketRef.current.emit('ballControl', { control: true, shooting: false });
+                    }
                     break;
                 default:
                     break;
@@ -897,6 +1088,10 @@ const Game = () => {
                 case "d":
                     direction = "right";
                     break;
+                case " ":
+                    socketRef.current.emit('ballControl', { control: false, shooting: true });
+                    break;
+
                 default:
                     break;
             }
@@ -941,6 +1136,14 @@ const Game = () => {
             if (socketRef.current) {
                 socketRef.current.disconnect();
             }
+
+            if (controlEffectsRef.current) {
+                controlEffectsRef.current.particles.forEach(particle => particle.dispose());
+                controlEffectsRef.current.controlRing.dispose();
+                controlEffectsRef.current.ballHalo.dispose();
+                // El controlTimeText se limpiará con advancedTexture
+            }
+
             window.removeEventListener('resize', handleResize);
             window.removeEventListener('keydown', handleKeyDown);
             window.removeEventListener('keyup', handleKeyUp);
@@ -1140,7 +1343,7 @@ const Game = () => {
                                 }}>
                                     <span style={{ color: 'white' }}>{playerName}</span>
                                     <span style={{ color: currentTeam === 'left' ? '#3b82f6' : '#ef4444' }}>
-                                        {currentTeam === 'left' ? 'Azul' : 'Rojo'}
+                                        {currentTeam === 'left' ? 'Mamíferos' : 'Reptiles'}
                                     </span>
                                 </div>
                             </div>
@@ -1182,8 +1385,12 @@ const Game = () => {
                             opacity: 0.8,
                             pointerEvents: 'none'
                         }}>
-                            <p style={{ margin: '4px 0' }}>👇 Usa el joystick para moverte</p>
-                            <p style={{ margin: '4px 0' }}>💬 Toca el ícono del chat para escribir</p>
+                            <p style={{ margin: '0 0 4px 0' }}>
+                                {isMobile ? 'Usa el joystick para moverte' : 'WASD o ↑←↓→ para moverte'}
+                            </p>
+                            <p style={{ margin: '0' }}>
+                                {isMobile ? 'Toca el chat para escribir' : 'ESPACIO para controlar el balón (máx 3s)'}
+                            </p>
                         </div>
 
                         {/* Joystick */}
@@ -1344,13 +1551,13 @@ const Game = () => {
                                 pointerEvents: 'auto'
                             }}>
                                 <h3 style={{ margin: '0 0 8px 0' }}>Jugadores</h3>
-                                {/* Equipo Azul */}
+                                {/* Equipo Mamíferos */}
                                 <div style={{ marginBottom: '10px' }}>
                                     <h4 style={{
                                         margin: '0 0 4px 0',
                                         color: '#3b82f6'
                                     }}>
-                                        Equipo Azul
+                                        Equipo Mamíferos
                                     </h4>
                                     <ul style={{
                                         listStyleType: 'none',
@@ -1364,13 +1571,13 @@ const Game = () => {
                                         ))}
                                     </ul>
                                 </div>
-                                {/* Equipo Rojo */}
+                                {/* Equipo Reptiles */}
                                 <div>
                                     <h4 style={{
                                         margin: '0 0 4px 0',
                                         color: '#ef4444'
                                     }}>
-                                        Equipo Rojo
+                                        Equipo Reptiles
                                     </h4>
                                     <ul style={{
                                         listStyleType: 'none',
@@ -1400,7 +1607,10 @@ const Game = () => {
                                     {isMobile ? 'Usa el joystick para moverte' : 'WASD o ↑←↓→ para moverte'}
                                 </p>
                                 <p style={{ margin: '0' }}>
-                                    {isMobile ? 'Toca el chat para escribir' : 'Enter para enviar mensajes'}
+                                    {isMobile ? 'Toca el chat para escribir' : 'ESPACIO para controlar el balón (máx 3s). Suelta ESPACIO para disparar '}
+                                </p>
+                                <p style={{ margin: '0' }}>
+                                    {isMobile ? '' : 'Enter para enviar mensajes'}
                                 </p>
                             </div>
                         </div>
@@ -1437,7 +1647,7 @@ const Game = () => {
                                         marginLeft: '8px',
                                         color: currentTeam === 'left' ? '#3b82f6' : '#ef4444'
                                     }}>
-                                        ({currentTeam === 'left' ? 'Equipo Azul' : 'Equipo Rojo'})
+                                        ({currentTeam === 'left' ? 'Equipo Mamíferos' : 'Equipo Reptiles'})
                                     </span>
                                 </div>
                                 <div style={{

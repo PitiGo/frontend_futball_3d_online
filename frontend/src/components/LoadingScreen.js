@@ -57,7 +57,7 @@ const LoadingScreen = () => {
         gap: '1rem'
       }}>
         <div style={{ animation: 'spin 2s linear infinite' }}>⚽</div>
-        Azul vs Rojo
+        Mamíferos vs Reptiles
       </div>
 
       {/* Contenedor de la animación de carga */}
@@ -111,7 +111,7 @@ const LoadingScreen = () => {
           width: '2px',
           backgroundColor: '#60a5fa'
         }} />
-        
+
         {/* Círculo central */}
         <div style={{
           position: 'absolute',

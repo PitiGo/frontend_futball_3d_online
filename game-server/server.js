@@ -9,7 +9,7 @@ app.use(cors());
 
 const TEAM_CHARACTERS = {
   left: ['player', 'pig'],
-  right: ['turtle', 'croc']
+  right: ['turtle', 'lizard']
 };
 
 const httpServer = createServer(app);
@@ -23,6 +23,9 @@ const io = new Server(httpServer, {
 // Constantes y estados del juego
 const MAX_PLAYERS_PER_TEAM = 3;
 const GOALS_TO_WIN = 3;
+const BALL_CONTROL_RADIUS = 1.5; // Radio de control del balón
+const BALL_CONTROL_FORCE = 0.8; // Qué tanto el jugador puede influir en el balón
+const BALL_RELEASE_BOOST = 1.5; // Multiplicador de velocidad al soltar el balón
 
 const teams = {
   left: [],
@@ -82,9 +85,9 @@ function resetBall() {
 
 function getWinningMessage(team) {
   if (team === 'left') {
-    return '¡El EQUIPO AZUL ha ganado el partido!';
+    return '¡El EQUIPO MAMÍFEROS ha ganado el partido!';
   } else {
-    return '¡El EQUIPO ROJO ganado el partido!';
+    return '¡El EQUIPO REPTILES ganado el partido!';
   }
 }
 
@@ -151,7 +154,7 @@ function endGame(reason) {
   resetBall();
 
   // Determinar el equipo ganador basado en la razón o el puntaje
-  const winningTeam = reason.includes('AZUL') ? 'left' : 'right';
+  const winningTeam = reason.includes('MAMÍFEROS') ? 'left' : 'right';
 
   // Limpiar estado de jugadores y equipos
   teams.left.forEach(player => {
@@ -248,20 +251,53 @@ function updateGameState() {
   // Colisiones jugador-pelota
   players.forEach((player) => {
     const distanceToPlayer = Vector3.Distance(player.position, ballPosition);
-    if (distanceToPlayer < PLAYER_RADIUS + BALL_RADIUS) {
-      const collisionNormal = ballPosition.subtract(player.position).normalize();
-      const relativeVelocity = ballVelocity.subtract(player.velocity);
-      const impulseStrength = -(1 + RESTITUTION) * Vector3.Dot(relativeVelocity, collisionNormal) /
-        (1 / BALL_MASS + 1 / PLAYER_MASS);
+    const KICK_RADIUS = PLAYER_RADIUS + BALL_RADIUS + 0.3; // Radio para patear
+    const controlRadius = player.isControllingBall ? BALL_CONTROL_RADIUS : (PLAYER_RADIUS + BALL_RADIUS);
 
-      const impulse = collisionNormal.scale(impulseStrength);
+    if (distanceToPlayer < controlRadius) {
+      if (player.isControllingBall) {
+        const controlDuration = (Date.now() - player.ballControlTime) / 1000;
+        if (controlDuration >= 3) {
+          player.isControllingBall = false;
+          const randomVelocity = new Vector3(
+            (Math.random() - 0.5) * 1.5,
+            0,
+            (Math.random() - 0.5) * 1.5
+          );
 
-      ballVelocity = ballVelocity.add(impulse.scale(1 / BALL_MASS));
-      player.velocity = player.velocity.subtract(impulse.scale(1 / PLAYER_MASS));
+          // Añadir el impulso basado en la velocidad del jugador
+          const playerVelocityComponent = player.velocity.scale(0.8);
+          ballVelocity = randomVelocity.add(playerVelocityComponent);
+        } else {
+          let direction;
+          if (player.velocity.length() > 0.01) {
+            direction = player.velocity.normalize();
+          } else {
+            direction = new Vector3(
+              Math.cos(player.rotation.y),
+              0,
+              Math.sin(player.rotation.y)
+            );
+          }
 
-      const separation = (PLAYER_RADIUS + BALL_RADIUS - distanceToPlayer) * 0.5;
-      ballPosition = ballPosition.add(collisionNormal.scale(separation));
-      player.position = player.position.subtract(collisionNormal.scale(separation));
+          const idealPosition = player.position.add(
+            direction.scale(PLAYER_RADIUS + BALL_RADIUS + 0.5)
+          );
+
+          ballPosition = Vector3.Lerp(ballPosition, idealPosition, 0.2);
+          ballVelocity = Vector3.Zero();
+        }
+      } else {
+        // Colisión normal
+        const collisionNormal = ballPosition.subtract(player.position).normalize();
+        const relativeVelocity = ballVelocity.subtract(player.velocity);
+        const impulseStrength = -(1 + RESTITUTION) * Vector3.Dot(relativeVelocity, collisionNormal) /
+          (1 / BALL_MASS + 1 / PLAYER_MASS);
+
+        const impulse = collisionNormal.scale(impulseStrength * 1.2);
+        ballVelocity = ballVelocity.add(impulse.scale(1 / BALL_MASS));
+        player.velocity = player.velocity.subtract(impulse.scale(1 / PLAYER_MASS));
+      }
     }
   });
 
@@ -321,7 +357,9 @@ function updateGameState() {
       rotation: quaternionToObject(player.rotation),
       isMoving: player.movement.up || player.movement.down || player.movement.left || player.movement.right,
       team: player.team,
-      characterType: player.characterType
+      characterType: player.characterType,
+      isControllingBall: player.isControllingBall,  // Asegúrate de que esta línea esté presente
+      ballControlTime: player.isControllingBall ? player.ballControlTime : null
     })),
     ballPosition: vector3ToObject(ballPosition),
     score: score,
@@ -368,7 +406,9 @@ io.on('connection', (socket) => {
       rotation: new Quaternion(),
       movement: { up: false, down: false, left: false, right: false },
       velocity: new Vector3(0, 0, 0),
-      ready: false
+      ready: false,
+      isControllingBall: false,
+      ballControlTime: 0
     });
 
     console.log(`Jugador ${name} agregado con ID ${socket.id}`);
@@ -479,27 +519,27 @@ io.on('connection', (socket) => {
 
   socket.on('playerMoveStart', ({ direction }) => {
     if (!['up', 'down', 'left', 'right'].includes(direction)) {
-        socket.emit('error', { message: 'Dirección inválida' });
-        return;
+      socket.emit('error', { message: 'Dirección inválida' });
+      return;
     }
 
     const player = players.get(socket.id);
     if (player) {
-        player.movement[direction] = true;
+      player.movement[direction] = true;
     }
-});
+  });
 
-socket.on('playerMoveStop', ({ direction }) => {
+  socket.on('playerMoveStop', ({ direction }) => {
     if (!['up', 'down', 'left', 'right'].includes(direction)) {
-        socket.emit('error', { message: 'Dirección inválida' });
-        return;
+      socket.emit('error', { message: 'Dirección inválida' });
+      return;
     }
 
     const player = players.get(socket.id);
     if (player) {
-        player.movement[direction] = false;
+      player.movement[direction] = false;
     }
-});
+  });
 
   socket.on('chatMessage', (message) => {
     const player = players.get(socket.id);
@@ -515,6 +555,31 @@ socket.on('playerMoveStop', ({ direction }) => {
       }
     }
   });
+
+  socket.on('ballControl', ({ control, shooting }) => {
+    const player = players.get(socket.id);
+    if (player) {
+      const distanceToPlayer = Vector3.Distance(player.position, ballPosition);
+      const KICK_RADIUS = PLAYER_RADIUS + BALL_RADIUS + 0.3;
+
+      console.log(`Jugador ${player.name} ${control ? 'inició' : 'soltó'} el control del balón`);
+      player.isControllingBall = control;
+
+      if (control) {
+        player.ballControlTime = Date.now();
+      } else if (shooting) {
+        // Aplicar boost SOLO al soltar Y si está dentro del radio de pateo
+        const controlDuration = (Date.now() - player.ballControlTime) / 1000;
+        if (controlDuration < 3 && distanceToPlayer <= KICK_RADIUS) {
+          const playerToBall = ballPosition.subtract(player.position);
+          // Aumentar el boost para un disparo más potente
+          ballVelocity = playerToBall.normalize().scale(BALL_RELEASE_BOOST * 1.5);
+          console.log('Aplicando disparo - Distancia:', distanceToPlayer);
+        }
+      }
+    }
+  });
+
 
   socket.on('disconnect', () => {
     const player = players.get(socket.id);
