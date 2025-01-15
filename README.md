@@ -22,7 +22,7 @@ A real-time multiplayer soccer game where two teams of anthropomorphic animals c
   - React
   - Babylon.js for 3D graphics
   - Socket.IO client for real-time communication
-  - Tailwind CSS for styling
+  - CSS for styling
 
 - **Backend**:
   - Node.js
@@ -53,8 +53,8 @@ A real-time multiplayer soccer game where two teams of anthropomorphic animals c
 
 1. Clone the repository:
 ```bash
-git clone https://github.com/yourusername/animal-soccer-game.git
-cd animal-soccer-game
+git clone https://github.com/PitiGo/frontend_futball_3d_online.git
+cd frontend_futball_3d_online
 ```
 
 2. Install dependencies for both client and server:
@@ -109,12 +109,6 @@ We welcome contributions! Please follow these steps:
 
 This project is licensed under the MIT License - see the [LICENSE.md](LICENSE.md) file for details.
 
-## Acknowledgments
-
-- Character models and assets created by [Creator Name]
-- Sound effects from [Source]
-- Special thanks to all contributors and testers
-
 ## Support
 
-For support, please open an issue in the GitHub repository or contact us at [support email].
+For support, please open an issue in the GitHub repository.
