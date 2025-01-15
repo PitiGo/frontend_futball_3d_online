@@ -2,7 +2,13 @@
 
 A real-time multiplayer soccer game where two teams of anthropomorphic animals compete in an exciting match. Players can choose between Mammals (blue team) or Reptiles (red team) and select different animal characters with unique characteristics.
 
-![Game Screenshot](screenshot.png)
+# Screenshots
+
+## Character Selection
+![Character Selection Screen](screen1.png)
+
+## Gameplay
+![Gameplay Screen](screen2.png)
 
 ## Features
 
