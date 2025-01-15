@@ -1,0 +1,32 @@
+services:
+  frontend:
+    build: ./frontend
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - REACT_APP_BASE_URL=https://football-online-3d.dantecollazzi.com
+    networks:
+      - game-network
+
+  sala1:
+    build: ./game-server
+    ports:
+      - "4000:4000"
+    environment:
+      - PORT=4000
+    networks:
+      - game-network
+
+  sala2:
+    build: ./game-server
+    ports:
+      - "4001:4000"
+    environment:
+      - PORT=4000
+    networks:
+      - game-network
+
+networks:
+  game-network:
+    driver: bridge

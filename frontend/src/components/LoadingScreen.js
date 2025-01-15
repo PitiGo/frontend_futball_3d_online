@@ -1,15 +1,13 @@
 import React, { useState, useEffect } from 'react';
+import { useTranslation } from '../i18n/LanguageContext';
 
 const LoadingScreen = () => {
+  const { t } = useTranslation();
   const [tipIndex, setTipIndex] = useState(0);
   const [loadingProgress, setLoadingProgress] = useState(0);
 
-  const tips = [
-    "💡 Usa las teclas WASD o las flechas para moverte",
-    "⚽ Golpea la pelota para hacer goles",
-    "🤝 Coopera con tu equipo para ganar",
-    "🎯 Apunta bien tus tiros a la portería"
-  ];
+  // Usar los tips desde las traducciones
+  const tips = t('loading.tips');
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -31,7 +29,7 @@ const LoadingScreen = () => {
       clearInterval(interval);
       clearInterval(progressInterval);
     };
-  }, []);
+  }, [tips.length]);
 
   return (
     <div id="loadingScreen" style={{
@@ -57,7 +55,7 @@ const LoadingScreen = () => {
         gap: '1rem'
       }}>
         <div style={{ animation: 'spin 2s linear infinite' }}>⚽</div>
-        Mamíferos vs Reptiles
+        {t('loading.title')}
       </div>
 
       {/* Contenedor de la animación de carga */}
@@ -149,7 +147,7 @@ const LoadingScreen = () => {
           fontWeight: 'bold',
           textAlign: 'center'
         }}>
-          Cargando el Juego...
+          {t('loading.loading')}
         </h2>
         <p style={{
           color: '#94a3b8',
@@ -157,7 +155,7 @@ const LoadingScreen = () => {
           maxWidth: '400px',
           fontSize: '0.875rem'
         }}>
-          Preparando los recursos del juego. Por favor, espera un momento...
+          {t('loading.preparingResources')}
         </p>
       </div>
 

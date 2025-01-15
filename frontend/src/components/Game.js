@@ -11,9 +11,14 @@ import LoginScreen from './LoginScreen';
 import CharacterManager from '../services/characterManager';
 import TeamSelectionScreen from './TeamSelectionScreen'
 import MobileJoystick from './MobileJoystick';  // <-- Añadir esta línea
+import LanguageSelector from '../i18n/LanguageSelector';
+import { useTranslation } from '../i18n/LanguageContext';
 
 
 const Game = () => {
+
+
+    const { t } = useTranslation();
     const canvasRef = useRef(null);
     const engineRef = useRef(null);
     const sceneRef = useRef(null);
@@ -249,10 +254,10 @@ const Game = () => {
         );
 
         // Posicionar la cámara
-        camera.setPosition(new BABYLON.Vector3(0, 10, -10));
+        camera.setPosition(new BABYLON.Vector3(0, 15, -20));
 
         if (isMobile) {
-            camera.setPosition(new BABYLON.Vector3(0, 15, -15)); // Vista más elevada
+            camera.setPosition(new BABYLON.Vector3(0, 20, -25)); // Vista más elevada
             camera.fov = 0.8; // Campo de visión más amplio
         }
         camera.setTarget(BABYLON.Vector3.Zero());
@@ -268,8 +273,8 @@ const Game = () => {
         dirLight.intensity = 0.5;
 
         // Campo de fútbol
-        const fieldWidth = 30;
-        const fieldHeight = 20;
+        const fieldWidth = 40;
+        const fieldHeight = 30;
         const ground = BABYLON.MeshBuilder.CreateGround('ground', {
             width: fieldWidth,
             height: fieldHeight
@@ -346,10 +351,12 @@ const Game = () => {
             const postMaterial = new BABYLON.StandardMaterial("postMat", scene);
             postMaterial.diffuseColor = new BABYLON.Color3(1, 1, 1);
 
-            const goalHeight = 2.44;
-            const goalWidth = 7.32;
-            const postDiameter = 0.12;
+            // Dimensiones coherentes con el servidor
+            const goalHeight = 3;  // Altura estándar de portería
+            const goalWidth = 7;      // Igual a GOAL_DEPTH del servidor
+            const postDiameter = 0.15;
 
+            // Crear los postes verticales
             const createPost = (offsetZ) => {
                 const post = BABYLON.MeshBuilder.CreateCylinder("post", {
                     height: goalHeight,
@@ -358,11 +365,21 @@ const Game = () => {
                 post.position = new BABYLON.Vector3(0, goalHeight / 2, offsetZ);
                 post.material = postMaterial;
                 post.parent = goalFrame;
+
+                // Añadir física a los postes
+                post.physicsImpostor = new BABYLON.PhysicsImpostor(
+                    post,
+                    BABYLON.PhysicsImpostor.CylinderImpostor,
+                    { mass: 0, restitution: 0.1 },
+                    scene
+                );
             };
 
-            createPost(-goalWidth / 2);
-            createPost(goalWidth / 2);
+            // Crear postes en las posiciones correctas
+            createPost(-goalWidth / 2);  // Poste izquierdo
+            createPost(goalWidth / 2);   // Poste derecho
 
+            // Travesaño
             const crossbar = BABYLON.MeshBuilder.CreateCylinder("crossbar", {
                 height: goalWidth,
                 diameter: postDiameter
@@ -372,10 +389,20 @@ const Game = () => {
             crossbar.position.z = 0;
             crossbar.material = postMaterial;
             crossbar.parent = goalFrame;
+
+            // Añadir física al travesaño
+            crossbar.physicsImpostor = new BABYLON.PhysicsImpostor(
+                crossbar,
+                BABYLON.PhysicsImpostor.CylinderImpostor,
+                { mass: 0, restitution: 0.1 },
+                scene
+            );
+
+            return goalFrame;
         };
 
-        createGoal(new BABYLON.Vector3(-fieldWidth / 2 + 0.5, 0, 0));
-        createGoal(new BABYLON.Vector3(fieldWidth / 2 - 0.5, 0, 0));
+        createGoal(new BABYLON.Vector3(-fieldWidth / 2 + 0.1, 0, 0));  // Portería izquierda
+        createGoal(new BABYLON.Vector3(fieldWidth / 2 - 0.1, 0, 0));   // Portería derecha
 
         // UI del marcador
         const advancedTexture = GUI.AdvancedDynamicTexture.CreateFullscreenUI('UI');
@@ -501,7 +528,7 @@ const Game = () => {
                         playerLabel.addControl(nameText);
 
                         playerLabel.linkWithMesh(playerInstance);
-                        playerLabel.linkOffsetY = isMobile ? -80 : -170;;
+                        playerLabel.linkOffsetY = isMobile ? -50 : -120;;
                         playerLabel.zIndex = 1;
 
                         playersLabelsRef.current[playerData.id] = playerLabel;
@@ -664,17 +691,36 @@ const Game = () => {
 
         window.addEventListener('resize', handleResize);
 
+
+        const isDev = process.env.NODE_ENV === 'development';
+        const baseUrl = isDev
+            ? `http://localhost`
+            : process.env.REACT_APP_BASE_URL;
+
+            
+
+        // Obtener la sala de la URL actual
+        const path = window.location.pathname;
+        const roomId = path.includes('sala2') ? 'sala2' : 'sala1';
+
         console.log('Intentando conectar al servidor...');
-        socketRef.current = io('http://localhost:4000', { transports: ['websocket'] });
-        // Nueva línea en Game.js
-        /*  socketRef.current = io('https://football-online-3d.dantecollazzi.com', {
-              transports: ['websocket']
-          });    */
+        console.log('Conectando al servidor de la sala:', roomId);
 
 
-        /*         socketRef.current = io(process.env.REACT_APP_SERVER_URL, {
-                    transports: ['websocket']
-                  }); */
+        if (isDev) {
+            // Configuración para desarrollo local
+            const url = `${baseUrl}:${roomId === 'sala1' ? '4000' : '4001'}`;
+            socketRef.current = io(url, {
+                transports: ['websocket']
+            });
+        } else {
+            // Configuración para producción
+            socketRef.current = io(baseUrl, {
+                transports: ['websocket'],
+                path: `/${roomId}/socket.io`,
+                secure: true
+            });
+        }
 
         socketRef.current.on('connect', () => {
             console.log('Conectado al servidor con Socket ID:', socketRef.current.id);
@@ -713,7 +759,7 @@ const Game = () => {
                         const timeLeft = Math.max(0, 3 - controlDuration).toFixed(1);
                         controlEffectsRef.current.controlTimeText.text = `${timeLeft}s`;
                         controlEffectsRef.current.controlTimeText.linkWithMesh(playerMesh);
-                        controlEffectsRef.current.controlTimeText.linkOffsetY = -100;
+                        controlEffectsRef.current.controlTimeText.linkOffsetY = -90;
                         controlEffectsRef.current.controlTimeText.isVisible = true;
                     }
                 }
@@ -847,7 +893,7 @@ const Game = () => {
                     playerLabel.addControl(nameText);
 
                     playerLabel.linkWithMesh(playerInstance);
-                    playerLabel.linkOffsetY = isMobile ? -80 : -170;
+                    playerLabel.linkOffsetY = isMobile ? -50 : -120;
                     playerLabel.zIndex = 1;
 
                     playersLabelsRef.current[id] = playerLabel;
@@ -874,7 +920,7 @@ const Game = () => {
             advancedTextureRef.current.addControl(flashScreen);
 
             const goalText = new GUI.TextBlock();
-            goalText.text = "¡GOL!";
+            goalText.text = t('gameUI.goal');
             goalText.color = "white";
             goalText.fontSize = isMobile ? 80 : 120;
             goalText.fontWeight = "bold";
@@ -887,7 +933,9 @@ const Game = () => {
             advancedTextureRef.current.addControl(goalText);
 
             const teamText = new GUI.TextBlock();
-            teamText.text = team === 'left' ? "¡EQUIPO MAMÍFEROS!" : "¡EQUIPO REPTILES!";
+            teamText.text = team === 'left'
+                ? t('gameUI.mammalTeam')
+                : t('gameUI.reptileTeam');
             teamText.color = team === 'left' ? "#3b82f6" : "#ef4444";
             teamText.fontSize = isMobile ? 40 : 60;
             teamText.fontWeight = "bold";
@@ -932,7 +980,9 @@ const Game = () => {
             if (advancedTextureRef.current) {
                 const isBlueTeam = winningTeam === 'left';
                 const teamColor = isBlueTeam ? '#3b82f6' : '#ef4444';
-                const teamName = isBlueTeam ? "EQUIPO MAMÍFEROS" : "EQUIPO REPTILES";
+                const teamName = isBlueTeam
+                    ? t('gameUI.mammalTeam')
+                    : t('gameUI.reptileTeam');
 
                 const fullscreenBg = new GUI.Rectangle("fullscreenBg");
                 fullscreenBg.width = "100%";
@@ -953,7 +1003,7 @@ const Game = () => {
                 advancedTextureRef.current.addControl(victoryMessage);
 
                 const titleText = new GUI.TextBlock();
-                titleText.text = "¡VICTORIA!";
+                titleText.text = t('gameUI.victory');
                 titleText.color = teamColor;
                 titleText.fontSize = isMobile ? 36 : 48;
                 titleText.fontFamily = "Arial";
@@ -979,7 +1029,7 @@ const Game = () => {
 
                 if (finalScore) {
                     const scoreText = new GUI.TextBlock();
-                    scoreText.text = "RESULTADO FINAL";
+                    scoreText.text = t('gameUI.finalScore');
                     scoreText.color = "white";
                     scoreText.fontSize = isMobile ? 20 : 24;
                     scoreText.top = isMobile ? "30px" : "40px";
@@ -1228,6 +1278,12 @@ const Game = () => {
             userSelect: 'none',
             touchAction: 'none'
         }}>
+
+
+            {/* Agregar el selector de idioma aquí */}
+            <LanguageSelector />
+
+
             {isLoading && <LoadingScreen />}
 
             {!isLoading && !hasJoined && (
@@ -1343,7 +1399,7 @@ const Game = () => {
                                 }}>
                                     <span style={{ color: 'white' }}>{playerName}</span>
                                     <span style={{ color: currentTeam === 'left' ? '#3b82f6' : '#ef4444' }}>
-                                        {currentTeam === 'left' ? 'Mamíferos' : 'Reptiles'}
+                                        {currentTeam === 'left' ? t('teamSelection.mammals') : t('teamSelection.reptiles')}
                                     </span>
                                 </div>
                             </div>
@@ -1385,11 +1441,16 @@ const Game = () => {
                             opacity: 0.8,
                             pointerEvents: 'none'
                         }}>
+                            <h3 style={{ margin: '0 0 8px 0' }}>{t('gameUI.controls')}</h3>
                             <p style={{ margin: '0 0 4px 0' }}>
-                                {isMobile ? 'Usa el joystick para moverte' : 'WASD o ↑←↓→ para moverte'}
+                                {isMobile
+                                    ? t('gameUI.mobileMovementInstructions')
+                                    : t('gameUI.moveInstructions')}
                             </p>
                             <p style={{ margin: '0' }}>
-                                {isMobile ? 'Toca el chat para escribir' : 'ESPACIO para controlar el balón (máx 3s)'}
+                                {isMobile
+                                    ? t('gameUI.mobileChatInstructions')
+                                    : t('gameUI.ballControlInstructions')}
                             </p>
                         </div>
 
@@ -1449,7 +1510,7 @@ const Game = () => {
                                     justifyContent: 'center'
                                 }}
                             >
-                                {isMobileChatExpanded ? 'Chat ▼' : '💬'}
+                                {isMobileChatExpanded ? t('gameUI.chat') : '💬'}
                             </button>
 
                             {isMobileChatExpanded && (
@@ -1505,7 +1566,7 @@ const Game = () => {
                                                 color: 'white',
                                                 fontSize: '12px'
                                             }}
-                                            placeholder="Mensaje..."
+                                            placeholder={t('gameUI.chatPlaceholder')}
                                         />
                                         <button
                                             type="submit"
@@ -1550,14 +1611,14 @@ const Game = () => {
                                 maxWidth: '200px',
                                 pointerEvents: 'auto'
                             }}>
-                                <h3 style={{ margin: '0 0 8px 0' }}>Jugadores</h3>
+                                <h3 style={{ margin: '0 0 8px 0' }}>{t('gameUI.players')}</h3>
                                 {/* Equipo Mamíferos */}
                                 <div style={{ marginBottom: '10px' }}>
                                     <h4 style={{
                                         margin: '0 0 4px 0',
                                         color: '#3b82f6'
                                     }}>
-                                        Equipo Mamíferos
+                                        {`${t('teamSelection.team')} ${t('teamSelection.mammals')}`}
                                     </h4>
                                     <ul style={{
                                         listStyleType: 'none',
@@ -1577,7 +1638,7 @@ const Game = () => {
                                         margin: '0 0 4px 0',
                                         color: '#ef4444'
                                     }}>
-                                        Equipo Reptiles
+                                        {`${t('teamSelection.team')} ${t('teamSelection.reptiles')}`}
                                     </h4>
                                     <ul style={{
                                         listStyleType: 'none',
@@ -1602,15 +1663,19 @@ const Game = () => {
                                 borderRadius: '8px',
                                 pointerEvents: 'auto'
                             }}>
-                                <h3 style={{ margin: '0 0 8px 0' }}>Controles</h3>
+                                <h3 style={{ margin: '0 0 8px 0' }}>{t('gameUI.controls')}</h3>
                                 <p style={{ margin: '0 0 4px 0' }}>
-                                    {isMobile ? 'Usa el joystick para moverte' : 'WASD o ↑←↓→ para moverte'}
+                                    {isMobile
+                                        ? t('gameUI.mobileMovementInstructions')
+                                        : t('gameUI.moveInstructions')}
                                 </p>
                                 <p style={{ margin: '0' }}>
-                                    {isMobile ? 'Toca el chat para escribir' : 'ESPACIO para controlar el balón (máx 3s). Suelta ESPACIO para disparar '}
+                                    {isMobile
+                                        ? t('gameUI.mobileChatInstructions')
+                                        : t('gameUI.ballControlInstructions')}
                                 </p>
                                 <p style={{ margin: '0' }}>
-                                    {isMobile ? '' : 'Enter para enviar mensajes'}
+                                    {isMobile ? '' : t('gameUI.enterToSend')}
                                 </p>
                             </div>
                         </div>
@@ -1642,12 +1707,12 @@ const Game = () => {
                                     display: 'flex',
                                     alignItems: 'center'
                                 }}>
-                                    {playerName || 'Desconocido'}
+                                    {playerName || t('gameUI.unknown')}
                                     <span style={{
                                         marginLeft: '8px',
                                         color: currentTeam === 'left' ? '#3b82f6' : '#ef4444'
                                     }}>
-                                        ({currentTeam === 'left' ? 'Equipo Mamíferos' : 'Equipo Reptiles'})
+                                        {currentTeam === 'left' ? t('teamSelection.mammals') : t('teamSelection.reptiles')}
                                     </span>
                                 </div>
                                 <div style={{
@@ -1659,7 +1724,7 @@ const Game = () => {
                                     display: 'flex',
                                     alignItems: 'center'
                                 }}>
-                                    {isConnected ? 'Conectado' : 'Desconectado'}
+                                    {isConnected ? t('gameUI.connected') : t('gameUI.disconnected')}
                                 </div>
                             </div>
 
@@ -1693,7 +1758,7 @@ const Game = () => {
                                         justifyContent: 'center'
                                     }}
                                 >
-                                    {chatExpanded ? 'Chat ▼' : '💬'}
+                                    {chatExpanded ? t('gameUI.chatExpanded') : '💬'}
                                 </button>
 
                                 {chatExpanded && (
@@ -1755,7 +1820,7 @@ const Game = () => {
                                                     fontSize: '14px',
                                                     color: 'white'
                                                 }}
-                                                placeholder="Escribe un mensaje..."
+                                                placeholder={t('gameUI.writeMessage')}
                                             />
                                             <button
                                                 type="submit"

@@ -1,17 +1,19 @@
 import React, { useState } from 'react';
+import { useTranslation } from '../i18n/LanguageContext';
 
 const LoginScreen = ({ onJoin }) => {
+    const { t } = useTranslation();
     const [playerName, setPlayerName] = useState('');
     const [error, setError] = useState('');
 
     const handleSubmit = (e) => {
         e.preventDefault();
         if (playerName.trim().length < 2) {
-            setError('El nombre debe tener al menos 2 caracteres');
+            setError(t('login.errors.nameLength'));
             return;
         }
         if (playerName.trim().length > 15) {
-            setError('El nombre no puede tener más de 15 caracteres');
+            setError(t('login.errors.maxLength'));
             return;
         }
         onJoin(playerName.trim());
@@ -37,14 +39,14 @@ const LoginScreen = ({ onJoin }) => {
                 width: '300px'
             }}>
                 <h2 style={{ textAlign: 'center', marginBottom: '20px' }}>
-                    Unirse al juego
+                    {t('login.title')}
                 </h2>
                 <form onSubmit={handleSubmit}>
                     <input
                         type="text"
                         value={playerName}
                         onChange={(e) => setPlayerName(e.target.value)}
-                        placeholder="Ingresa tu nombre"
+                        placeholder={t('login.namePlaceholder')}
                         style={{
                             width: '100%',
                             padding: '8px',
@@ -70,7 +72,7 @@ const LoginScreen = ({ onJoin }) => {
                             cursor: 'pointer'
                         }}
                     >
-                        Jugar
+                        {t('login.playButton')}
                     </button>
                 </form>
             </div>

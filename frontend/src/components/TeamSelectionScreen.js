@@ -1,4 +1,5 @@
 import React from 'react';
+import { useTranslation } from '../i18n/LanguageContext';
 
 const TeamSelectionScreen = ({
   onTeamSelect,
@@ -11,17 +12,19 @@ const TeamSelectionScreen = ({
   gameInProgress,
   selectedCharacter
 }) => {
+
+  const { t } = useTranslation();
   const maxPlayersPerTeam = 3;
 
   // Definición de los personajes disponibles para cada equipo
   const teamCharacters = {
     left: [
-      { id: 'player', name: 'Conejo', description: 'Jugador equilibrado' },
-      { id: 'pig', name: 'Cerdo', description: 'Vieja gloria del Rock' }
+      { id: 'player', name: t('teamSelection.characters.rabbit.name'), description: t('teamSelection.characters.rabbit.description') },
+      { id: 'pig', name: t('teamSelection.characters.pig.name'), description: t('teamSelection.characters.pig.description') }
     ],
     right: [
-      { id: 'turtle', name: 'Tortuga', description: 'Jugador equilibrado' },
-      { id: 'lizard', name: 'Lagarto', description: 'Fuerte y resistente' }
+      { id: 'turtle', name: t('teamSelection.characters.turtle.name'), description: t('teamSelection.characters.turtle.description') },
+      { id: 'lizard', name: t('teamSelection.characters.lizard.name'), description: t('teamSelection.characters.lizard.description') }
     ]
   };
 
@@ -45,15 +48,14 @@ const TeamSelectionScreen = ({
           maxWidth: '90%',
         }}>
           <h2 style={{ color: '#dc2626', marginBottom: '0.5rem', fontSize: '1rem' }}>
-            Partida en Curso
+            {t('teamSelection.gameInProgress')}
           </h2>
           <p style={{
             color: '#4b5563',
             marginBottom: '0.5rem',
             fontSize: '0.875rem',
           }}>
-            Lo sentimos, hay una partida en curso en este momento.
-            Por favor, intenta unirte más tarde cuando la partida actual haya terminado.
+            {t('teamSelection.gameInProgressMessage')}
           </p>
           <button
             onClick={() => window.location.reload()}
@@ -67,7 +69,7 @@ const TeamSelectionScreen = ({
               fontSize: '0.875rem',
             }}
           >
-            Volver a Intentar
+            {t('teamSelection.tryAgain')}
           </button>
         </div>
       </div>
@@ -103,7 +105,7 @@ const TeamSelectionScreen = ({
   const playerTeam = getPlayerTeam();
   const playerId = getCurrentPlayerId();
 
-  const getTeamName = (team) => team === 'left' ? 'Mamíferos' : 'Reptiles';
+  const getTeamName = (team) => team === 'left' ? t('teamSelection.mammals') : t('teamSelection.reptiles');
   const getTeamColor = (team) => team === 'left' ? '#3b82f6' : '#ef4444';
 
   return (
@@ -159,10 +161,10 @@ const TeamSelectionScreen = ({
             fontWeight: 'bold',
           }}>
             {!currentTeam
-              ? 'Selecciona tu Equipo'
+              ? t('teamSelection.selectTeam')
               : !selectedCharacter
-                ? `Selecciona tu Personaje - ${getTeamName(currentTeam)}`
-                : 'Prepárate para jugar'}
+                ? `${t('teamSelection.selectCharacter')} - ${getTeamName(currentTeam)}`
+                : t('teamSelection.prepareToPlay')}
           </h2>
         </div>
 
@@ -194,7 +196,7 @@ const TeamSelectionScreen = ({
                 marginBottom: '0.5rem',
                 fontSize: '1rem',
               }}>
-                Equipo Mamíferos ({teams?.left?.length || 0}/{maxPlayersPerTeam})
+                {`${t('teamSelection.team')} ${t('teamSelection.mammals')} (${teams?.left?.length || 0}/${maxPlayersPerTeam})`}
               </div>
               <div style={{
                 backgroundColor: 'white',
@@ -225,7 +227,7 @@ const TeamSelectionScreen = ({
                         fontSize: '0.875rem',
                       }}>
                         {player.name}
-                        {player.name === playerName && ' (Tú)'}
+                        {player.name === playerName && ` (${t('teamSelection.you')})`}
                       </span>
                       {player.characterType && (
                         <small style={{
@@ -253,7 +255,7 @@ const TeamSelectionScreen = ({
                     padding: '1rem',
                     fontSize: '0.875rem',
                   }}>
-                    Sin jugadores
+                    {t('teamSelection.noPlayers')}
                   </div>
                 )}
               </div>
@@ -274,7 +276,8 @@ const TeamSelectionScreen = ({
                     transition: 'all 0.2s ease',
                   }}
                 >
-                  Unirse a Mamíferos
+                  {t('teamSelection.joinMammals')}
+
                 </button>
               )}
             </div>
@@ -295,7 +298,7 @@ const TeamSelectionScreen = ({
                 marginBottom: '0.5rem',
                 fontSize: '1rem',
               }}>
-                Equipo Reptiles ({teams?.right?.length || 0}/{maxPlayersPerTeam})
+                {`${t('teamSelection.team')} ${t('teamSelection.reptiles')} (${teams?.right?.length || 0}/${maxPlayersPerTeam})`}
               </div>
               <div style={{
                 backgroundColor: 'white',
@@ -326,7 +329,7 @@ const TeamSelectionScreen = ({
                         fontSize: '0.875rem',
                       }}>
                         {player.name}
-                        {player.name === playerName && ' (Tú)'}
+                        {player.name === playerName && ` (${t('teamSelection.you')})`}
                       </span>
                       {player.characterType && (
                         <small style={{
@@ -354,7 +357,7 @@ const TeamSelectionScreen = ({
                     padding: '1rem',
                     fontSize: '0.875rem',
                   }}>
-                    Sin jugadores
+                    {t('teamSelection.noPlayers')}
                   </div>
                 )}
               </div>
@@ -375,7 +378,7 @@ const TeamSelectionScreen = ({
                     transition: 'all 0.2s ease',
                   }}
                 >
-                  Unirse a Reptiles
+                  {t('teamSelection.joinReptiles')}
                 </button>
               )}
             </div>
@@ -398,8 +401,8 @@ const TeamSelectionScreen = ({
                   fontWeight: 'bold',
                 }}>
                   {selectedCharacter
-                    ? `Tu personaje: ${teamCharacters[currentTeam].find(c => c.id === selectedCharacter)?.name}`
-                    : `Selecciona tu personaje para el equipo ${getTeamName(currentTeam)}`}
+                    ? `${t('teamSelection.yourCharacter')}: ${teamCharacters[currentTeam].find(c => c.id === selectedCharacter)?.name}`
+                    : `${t('teamSelection.selectCharacterPrompt')} ${getTeamName(currentTeam)}`}
                 </h3>
 
                 <div style={{
@@ -477,8 +480,8 @@ const TeamSelectionScreen = ({
                     }}
                   >
                     {getReadyStatus(currentTeam, playerId)
-                      ? '🚫 CANCELAR'
-                      : '✓ COMENZAR'}
+                      ? `🚫 ${t('teamSelection.cancel')}`
+                      : `✓ ${t('teamSelection.ready')}`}
                   </button>
                 </div>
               )}
@@ -496,12 +499,12 @@ const TeamSelectionScreen = ({
             marginTop: '0.5rem',
           }}>
             {!currentTeam
-              ? "👈 Selecciona un equipo para continuar"
+              ? t('teamSelection.selectTeamContinue')
               : !selectedCharacter
-                ? `👆 Selecciona un personaje para el ${getTeamName(currentTeam)}`
+                ? `${t('teamSelection.selectCharacterPrompt')} ${getTeamName(currentTeam)}`
                 : getReadyStatus(currentTeam, playerId)
-                  ? "⌛ Esperando a que todos los jugadores estén listos..."
-                  : "✨ ¡Pulsa COMENZAR cuando estés listo!"}
+                  ? t('teamSelection.waitingPlayers')
+                  : t('teamSelection.pressReady')}
           </div>
         </div>
 

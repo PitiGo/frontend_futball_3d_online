@@ -17,7 +17,8 @@ const io = new Server(httpServer, {
   cors: {
     origin: "*",
     methods: ["GET", "POST"]
-  }
+  },
+  proxy: true
 });
 
 // Constantes y estados del juego
@@ -25,7 +26,7 @@ const MAX_PLAYERS_PER_TEAM = 3;
 const GOALS_TO_WIN = 3;
 const BALL_CONTROL_RADIUS = 1.5; // Radio de control del balón
 const BALL_CONTROL_FORCE = 0.8; // Qué tanto el jugador puede influir en el balón
-const BALL_RELEASE_BOOST = 1.5; // Multiplicador de velocidad al soltar el balón
+const BALL_RELEASE_BOOST = 0.8; // Multiplicador de velocidad al soltar el balón
 
 const teams = {
   left: [],
@@ -41,12 +42,12 @@ let currentGameState = gameStates.WAITING;
 const players = new Map();
 
 // Configuración del campo y la física
-const FIELD_WIDTH = 30;
-const FIELD_HEIGHT = 20;
+const FIELD_WIDTH = 40;
+const FIELD_HEIGHT = 30;
 const BALL_RADIUS = 0.5;
 const PLAYER_RADIUS = 0.5;
 const PLAYER_SPEED = 0.167;
-const GOAL_DEPTH = 5;
+const GOAL_DEPTH = 7;
 const GOAL_Z_MIN = -GOAL_DEPTH / 2;
 const GOAL_Z_MAX = GOAL_DEPTH / 2;
 const BALL_MASS = 0.45;
@@ -81,6 +82,29 @@ function quaternionToObject(quaternion) {
 function resetBall() {
   ballPosition = new Vector3(0, 0.5, 0);
   ballVelocity = new Vector3(0, 0, 0);
+}
+
+// Nueva función para reposicionar jugadores
+function resetPlayersPositions() {
+  players.forEach((player, id) => {
+    if (player.team === 'left') {
+      player.position = new Vector3(
+        -FIELD_WIDTH / 4,  // Cuarto izquierdo del campo
+        0.5,
+        (Math.random() * FIELD_HEIGHT - FIELD_HEIGHT / 2) * 0.8  // Posición Z aleatoria
+      );
+    } else if (player.team === 'right') {
+      player.position = new Vector3(
+        FIELD_WIDTH / 4,   // Cuarto derecho del campo
+        0.5,
+        (Math.random() * FIELD_HEIGHT - FIELD_HEIGHT / 2) * 0.8  // Posición Z aleatoria
+      );
+    }
+    // Resetear velocidad y estado de control del balón
+    player.velocity = new Vector3(0, 0, 0);
+    player.isControllingBall = false;
+    player.ballControlTime = 0;
+  });
 }
 
 function getWinningMessage(team) {
@@ -212,6 +236,7 @@ function updateGameState() {
 
       if (checkVictory()) return;
       resetBall();
+      resetPlayersPositions();
       return;
     }
   } else if (ballPosition.x > FIELD_WIDTH / 2 - BALL_RADIUS) {
@@ -225,6 +250,7 @@ function updateGameState() {
 
       if (checkVictory()) return;
       resetBall();
+      resetPlayersPositions(); 
       return;
     }
   }
@@ -573,7 +599,7 @@ io.on('connection', (socket) => {
         if (controlDuration < 3 && distanceToPlayer <= KICK_RADIUS) {
           const playerToBall = ballPosition.subtract(player.position);
           // Aumentar el boost para un disparo más potente
-          ballVelocity = playerToBall.normalize().scale(BALL_RELEASE_BOOST * 1.5);
+          ballVelocity = playerToBall.normalize().scale(BALL_RELEASE_BOOST * 0.8);
           console.log('Aplicando disparo - Distancia:', distanceToPlayer);
         }
       }
