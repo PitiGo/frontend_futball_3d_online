@@ -272,65 +272,127 @@ const Game = () => {
         const dirLight = new BABYLON.DirectionalLight("dirLight", new BABYLON.Vector3(-1, -2, -1), scene);
         dirLight.intensity = 0.5;
 
-        // Campo de fútbol
-        const fieldWidth = 40;
-        const fieldHeight = 30;
-        const ground = BABYLON.MeshBuilder.CreateGround('ground', {
-            width: fieldWidth,
-            height: fieldHeight
-        }, scene);
+        // Definir las dimensiones del campo como constantes al inicio
+        const FIELD_WIDTH = 40;
+        const FIELD_HEIGHT = 30;
 
-        const groundMaterial = new BABYLON.StandardMaterial('groundMat', scene);
-        groundMaterial.diffuseColor = new BABYLON.Color3(0.2, 0.6, 0.1);
-        ground.material = groundMaterial;
+        // Reemplazar la creación actual del campo con esta versión mejorada
+        const createProceduralField = (scene) => {
+            // Usar las constantes definidas arriba
+            const ground = BABYLON.MeshBuilder.CreateGround('ground', {
+                width: FIELD_WIDTH,
+                height: FIELD_HEIGHT,
+                subdivisions: isMobile ? 32 : 64
+            }, scene);
 
-        // Líneas del campo
-        const drawFieldLines = () => {
+            // Generar textura de césped procedural
+            const grassTexture = new BABYLON.DynamicTexture("proceduralGrass", isMobile ? 512 : 1024, scene);
+            const ctx = grassTexture.getContext();
+
+            // Color base del césped
+            ctx.fillStyle = "#2a6321";
+            ctx.fillRect(0, 0, grassTexture.getSize().width, grassTexture.getSize().height);
+
+            // Paleta de colores para variaciones
+            const colors = [
+                "#2a6321", // Verde base
+                "#225219", // Verde oscuro
+                "#337a27", // Verde claro
+                "#1e4a16", // Verde más oscuro
+                "#2d6d23"  // Verde medio
+            ];
+
+            // Generar variaciones de color
+            for (let i = 0; i < (isMobile ? 1000 : 2000); i++) {
+                const x = Math.random() * grassTexture.getSize().width;
+                const y = Math.random() * grassTexture.getSize().height;
+                const radius = 5 + Math.random() * 15;
+                const color = colors[Math.floor(Math.random() * colors.length)];
+
+                ctx.beginPath();
+                ctx.fillStyle = color;
+                ctx.globalAlpha = 0.3 + Math.random() * 0.4;
+                ctx.arc(x, y, radius, 0, Math.PI * 2);
+                ctx.fill();
+            }
+
+            // Añadir líneas de corte
+            const linesCount = isMobile ? 10 : 20;
+            for (let i = 0; i < linesCount; i++) {
+                const y = (i / linesCount) * grassTexture.getSize().height;
+                ctx.beginPath();
+                ctx.strokeStyle = i % 2 === 0 ? "#2d7023" : "#225219";
+                ctx.lineWidth = isMobile ? 5 : 10;
+                ctx.globalAlpha = 0.2;
+                ctx.moveTo(0, y);
+                ctx.lineTo(grassTexture.getSize().width, y);
+                ctx.stroke();
+            }
+
+            // Actualizar y configurar la textura
+            grassTexture.update();
+            grassTexture.wrapU = grassTexture.wrapV = BABYLON.Texture.WRAP_ADDRESSMODE;
+
+            // Crear y configurar el material
+            const grassMaterial = new BABYLON.StandardMaterial("grassMat", scene);
+            grassMaterial.diffuseTexture = grassTexture;
+            grassMaterial.specularColor = new BABYLON.Color3(0.1, 0.1, 0.1);
+            grassMaterial.diffuseTexture.uScale = 5;
+            grassMaterial.diffuseTexture.vScale = 4;
+
+            ground.material = grassMaterial;
+
+            // Añadir líneas del campo
+            const linesTexture = new BABYLON.DynamicTexture("linesTexture",
+                { width: isMobile ? 512 : 1024, height: isMobile ? 512 : 1024 }, scene);
+            const linesCtx = linesTexture.getContext();
+
+            // Dibujar líneas del campo
+            linesCtx.strokeStyle = "white";
+            linesCtx.lineWidth = isMobile ? 3 : 5;
+
+            // Líneas exteriores
+            linesCtx.strokeRect(10, 10, linesTexture.getSize().width - 20,
+                linesTexture.getSize().height - 20);
+
+            // Línea central
+            const center = linesTexture.getSize().width / 2;
+            linesCtx.beginPath();
+            linesCtx.moveTo(center, 10);
+            linesCtx.lineTo(center, linesTexture.getSize().height - 10);
+            linesCtx.stroke();
+
+            // Círculo central
+            linesCtx.beginPath();
+            linesCtx.arc(center, center, linesTexture.getSize().width / 10,
+                0, Math.PI * 2);
+            linesCtx.stroke();
+
+            linesTexture.update();
+
             const lines = BABYLON.MeshBuilder.CreatePlane("lines", { size: 1 }, scene);
             const linesMaterial = new BABYLON.StandardMaterial("linesMat", scene);
+            linesMaterial.diffuseTexture = linesTexture;
             linesMaterial.diffuseColor = new BABYLON.Color3(1, 1, 1);
             linesMaterial.alpha = 0.7;
             lines.material = linesMaterial;
             lines.rotation.x = Math.PI / 2;
             lines.position.y = 0.01;
+            lines.scaling = new BABYLON.Vector3(FIELD_WIDTH, FIELD_HEIGHT, 1);
 
-            const linesTexture = new BABYLON.DynamicTexture("linesTexture", { width: 1024, height: 1024 }, scene);
-            const ctx = linesTexture.getContext();
-            ctx.strokeStyle = "white";
-            ctx.lineWidth = 5;
+            // Configurar física
+            ground.physicsImpostor = new BABYLON.PhysicsImpostor(
+                ground,
+                BABYLON.PhysicsImpostor.BoxImpostor,
+                { mass: 0, restitution: 0.9, friction: 0.1 },
+                scene
+            );
 
-            // Líneas exteriores
-            ctx.strokeRect(10, 10, 1004, 1004);
-
-            // Línea central
-            ctx.beginPath();
-            ctx.moveTo(512, 10);
-            ctx.lineTo(512, 1014);
-            ctx.stroke();
-
-            // Círculo central
-            ctx.beginPath();
-            ctx.arc(512, 512, 100, 0, 2 * Math.PI);
-            ctx.stroke();
-
-            // Áreas de penalti
-            ctx.strokeRect(10, 337, 150, 350);
-            ctx.strokeRect(864, 337, 150, 350);
-
-            linesTexture.update();
-            linesMaterial.diffuseTexture = linesTexture;
-            lines.scaling = new BABYLON.Vector3(fieldWidth, fieldHeight, 1);
+            return ground;
         };
 
-        drawFieldLines();
-
-        // Física del suelo
-        ground.physicsImpostor = new BABYLON.PhysicsImpostor(
-            ground,
-            BABYLON.PhysicsImpostor.BoxImpostor,
-            { mass: 0, restitution: 0.9, friction: 0.1 },
-            scene
-        );
+        // Crear el campo
+        const ground = createProceduralField(scene);
 
         // Pelota
         const ball = BABYLON.MeshBuilder.CreateSphere('ball', { diameter: 1 }, scene);
@@ -401,8 +463,8 @@ const Game = () => {
             return goalFrame;
         };
 
-        createGoal(new BABYLON.Vector3(-fieldWidth / 2 + 0.1, 0, 0));  // Portería izquierda
-        createGoal(new BABYLON.Vector3(fieldWidth / 2 - 0.1, 0, 0));   // Portería derecha
+        createGoal(new BABYLON.Vector3(-FIELD_WIDTH / 2 + 0.1, 0, 0));  // Portería izquierda
+        createGoal(new BABYLON.Vector3(FIELD_WIDTH / 2 - 0.1, 0, 0));   // Portería derecha
 
         // UI del marcador
         const advancedTexture = GUI.AdvancedDynamicTexture.CreateFullscreenUI('UI');
@@ -697,7 +759,7 @@ const Game = () => {
             ? `http://localhost`
             : process.env.REACT_APP_BASE_URL;
 
-            
+
 
         // Obtener la sala de la URL actual
         const path = window.location.pathname;
@@ -1576,7 +1638,7 @@ const Game = () => {
                                                 border: 'none',
                                                 backgroundColor: '#4CAF50',
                                                 color: 'white',
-                                                fontSize: '12px'
+                                                cursor: 'pointer'
                                             }}
                                         >
                                             →
