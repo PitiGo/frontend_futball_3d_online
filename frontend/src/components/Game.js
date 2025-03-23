@@ -15,7 +15,7 @@ import LanguageSelector from '../i18n/LanguageSelector';
 import { useTranslation } from '../i18n/LanguageContext';
 
 
-const Game = () => {
+const Game = ({ roomId }) => {
 
 
     const { t } = useTranslation();
@@ -736,533 +736,124 @@ const Game = () => {
 
 
     useEffect(() => {
-        console.log('Componente Game montado');
+        console.log('Componente Game montado para sala:', roomId);
 
         const canvas = canvasRef.current;
+        if (!canvas) return;
+
         const scene = createScene(canvas);
 
-        engineRef.current.runRenderLoop(() => {
-            scene.render();
-        });
-
-        const handleResize = () => {
-            engineRef.current.resize();
-        };
-
-
-
-        window.addEventListener('resize', handleResize);
-
-
-        const isDev = process.env.NODE_ENV === 'development';
-        const baseUrl = isDev
-            ? `http://localhost`
-            : process.env.REACT_APP_BASE_URL;
-
-
-
-        // Obtener la sala de la URL actual
-        const path = window.location.pathname;
-        const roomId = path.includes('sala2') ? 'sala2' : 'sala1';
-
-        console.log('Intentando conectar al servidor...');
-        console.log('Conectando al servidor de la sala:', roomId);
-
-
-        if (isDev) {
-            // Configuración para desarrollo local
-            const url = `${baseUrl}:${roomId === 'sala1' ? '4000' : '4001'}`;
-            socketRef.current = io(url, {
-                transports: ['websocket']
-            });
-        } else {
-            // Configuración para producción
-            socketRef.current = io(baseUrl, {
-                transports: ['websocket'],
-                path: `/${roomId}/socket.io`,
-                secure: true
+        // Configurar el motor de renderizado
+        if (engineRef.current) {
+            engineRef.current.runRenderLoop(() => {
+                if (scene) {
+                    scene.render();
+                }
             });
         }
 
+        // Configuración del WebSocket basada en el entorno
+        const isDev = process.env.NODE_ENV === 'development';
+        const baseUrl = isDev ? 'http://localhost' : process.env.REACT_APP_BASE_URL;
+
+        // Configurar socket con el roomId específico
+        if (isDev) {
+            const url = `${baseUrl}:${roomId === 'sala1' ? '4000' : '4001'}`;
+            console.log('Conectando a servidor de desarrollo:', url);
+            socketRef.current = io(url, {
+                transports: ['websocket'],
+                query: { roomId }
+            });
+        } else {
+            console.log('Conectando a servidor de producción:', baseUrl);
+            socketRef.current = io(baseUrl, {
+                transports: ['websocket'],
+                path: `/${roomId}/socket.io`,
+                secure: true,
+                query: { roomId }
+            });
+        }
+
+        // Manejadores de eventos del socket
         socketRef.current.on('connect', () => {
-            console.log('Conectado al servidor con Socket ID:', socketRef.current.id);
+            console.log(`Conectado al servidor de la sala ${roomId} con ID:`, socketRef.current.id);
             setIsConnected(true);
         });
 
-        socketRef.current.on('gameStateUpdate', (gameState) => {
-            if (gameState.score) {
-                setScore(gameState.score);
-            }
-
-            // Agregar log para verificar el estado de animación
-            const localPlayer = gameState.players?.find(p => p.id === socketRef.current.id);
-            if (localPlayer) {
-                console.log('Estado de movimiento:', localPlayer.isMoving);
-            }
-
-            updateGameState(gameState);
-
-
-            // Actualizar efectos visuales de control
-            gameState.players.forEach(player => {
-                if (player.isControllingBall) {
-                    const playerMesh = playersRef.current[player.id];
-                    if (playerMesh && controlEffectsRef.current) {
-                        // Actualizar posición del anillo
-                        controlEffectsRef.current.controlRing.position = playerMesh.position.clone();
-                        controlEffectsRef.current.controlRing.position.y = 0.1;
-                        controlEffectsRef.current.controlRing.isVisible = true;
-
-                        // Mostrar halo alrededor del balón
-                        controlEffectsRef.current.ballHalo.isVisible = true;
-
-                        // Actualizar tiempo de control
-                        const controlDuration = (Date.now() - player.ballControlTime) / 1000;
-                        const timeLeft = Math.max(0, 3 - controlDuration).toFixed(1);
-                        controlEffectsRef.current.controlTimeText.text = `${timeLeft}s`;
-                        controlEffectsRef.current.controlTimeText.linkWithMesh(playerMesh);
-                        controlEffectsRef.current.controlTimeText.linkOffsetY = -90;
-                        controlEffectsRef.current.controlTimeText.isVisible = true;
-                    }
-                }
-            });
-
-            // Ocultar efectos si nadie está controlando
-            if (!gameState.players.some(p => p.isControllingBall) && controlEffectsRef.current) {
-                controlEffectsRef.current.controlRing.isVisible = false;
-                controlEffectsRef.current.controlTimeText.isVisible = false;
-                controlEffectsRef.current.ballHalo.isVisible = false;
-                controlEffectsRef.current.stopParticles();
-            }
-
-        });
-
-
-        socketRef.current.on('playersListUpdate', (playersList) => {
-            console.log('Lista de jugadores actualizada:', playersList);
-            setConnectedPlayers(playersList);
-        });
-
-        socketRef.current.on('chatUpdate', (chatMessage) => {
-            console.log('Mensaje de chat recibido:', chatMessage);
-            setChatMessages(prevMessages => [...prevMessages, chatMessage]);
-            // Hacer scroll después de que el mensaje se haya añadido
-            setTimeout(scrollToBottom, 100);
-        });
-
-        socketRef.current.on('disconnect', (reason) => {
-            console.log('Desconectado del servidor del juego:', reason);
+        socketRef.current.on('disconnect', () => {
+            console.log(`Desconectado de la sala ${roomId}`);
             setIsConnected(false);
         });
 
         socketRef.current.on('connect_error', (error) => {
-            console.error('Error de conexión:', error);
+            console.error(`Error de conexión en sala ${roomId}:`, error);
+            setIsConnected(false);
         });
 
-        // Añade estos nuevos event listeners en el useEffect:
-        socketRef.current.on('teamUpdate', (teamsData) => {
-            setTeams(teamsData);
-        });
-
-        socketRef.current.on('teamSelected', ({ team }) => {
-            setTeamSelected(true);
-            setCurrentTeam(team);
-        });
-
-        socketRef.current.on('gameInProgress', () => {
-            setGameInProgress(true);
-        });
-
-        socketRef.current.on('gameStateInfo', ({ currentState }) => {
-            setGameInProgress(currentState === 'playing');
-        });
-
-        socketRef.current.on('gameStart', () => {
-            setGameStarted(true);
-            setTeamSelected(true);
-            setGameInProgress(true);
-        });
-
-        socketRef.current.on('readyUpdate', (readyStatus) => {
-            console.log('Ready status recibido:', readyStatus);
-            setReadyState(readyStatus);
-        });
-
-        socketRef.current.on('playerUpdate', async ({ id, name, characterType, team }) => {
-            console.log(`Actualización de jugador recibida:`, { id, name, characterType, team });
-
-            const isLocalPlayer = id === socketRef.current.id;
-            const currentCamera = sceneRef.current?.activeCamera;
-            let previousPosition = null;
-
-            // Si el jugador existe, guardar su posición y limpiarlo
-            if (playersRef.current[id]) {
-                previousPosition = playersRef.current[id].position.clone();
-                characterManagerRef.current.removePlayer(id);
-                delete playersRef.current[id];
-
-                if (playersLabelsRef.current[id]) {
-                    playersLabelsRef.current[id].dispose();
-                    delete playersLabelsRef.current[id];
-                }
-            }
-
-            // Crear jugador si tiene un tipo de personaje
-            if (characterType) {
-                try {
-                    const playerInstance = await characterManagerRef.current.createPlayerInstance(
-                        id,
-                        characterType,
-                        team
-                    );
-
-                    // Usar posición previa o posición inicial según el equipo
-                    if (previousPosition) {
-                        playerInstance.position = previousPosition;
-                    } else {
-                        playerInstance.position = new BABYLON.Vector3(
-                            team === 'left' ? -15 : 15,
-                            0.5,
-                            0
-                        );
-                    }
-
-                    playersRef.current[id] = playerInstance;
-
-                    // Crear etiqueta del jugador
-                    const playerLabel = new GUI.Rectangle(`label-${id}`);
-                    playerLabel.width = isMobile ? "80px" : "120px";
-                    playerLabel.height = isMobile ? "20px" : "30px";
-                    playerLabel.background = team === 'left' ? "rgba(59, 130, 246, 0.8)" : "rgba(239, 68, 68, 0.8)";
-                    playerLabel.cornerRadius = isMobile ? 10 : 15;
-                    playerLabel.thickness = 1;
-                    playerLabel.color = "white";
-                    playerLabel.isPointerBlocker = false;
-
-                    const scale = isMobile ? 0.5 : 1;
-                    playerLabel.scaling = new BABYLON.Vector3(scale, scale, scale);
-
-                    advancedTextureRef.current.addControl(playerLabel);
-
-                    const nameText = new GUI.TextBlock();
-                    nameText.text = name;
-                    nameText.color = "white";
-                    nameText.fontSize = isMobile ? 10 : 14;
-                    nameText.fontWeight = "bold";
-                    nameText.fontFamily = "Arial";
-                    nameText.textHorizontalAlignment = GUI.Control.HORIZONTAL_ALIGNMENT_CENTER;
-                    nameText.textVerticalAlignment = GUI.Control.VERTICAL_ALIGNMENT_CENTER;
-                    playerLabel.addControl(nameText);
-
-                    playerLabel.linkWithMesh(playerInstance);
-                    playerLabel.linkOffsetY = isMobile ? -50 : -120;
-                    playerLabel.zIndex = 1;
-
-                    playersLabelsRef.current[id] = playerLabel;
-
-                    // Configurar cámara para el jugador local
-                    if (isLocalPlayer && currentCamera) {
-                        currentCamera.lockedTarget = playerInstance;
-                    }
-                } catch (error) {
-                    console.error('Error al actualizar instancia de jugador:', error);
-                }
-            }
-        });
-
-
-        // En Game.js, añadir el listener para el evento de gol
-        socketRef.current.on('goalScored', ({ team, score }) => {
-            const flashScreen = new GUI.Rectangle("goalFlash");
-            flashScreen.width = "100%";
-            flashScreen.height = "100%";
-            flashScreen.thickness = 0;
-            flashScreen.background = team === 'left' ? "#3b82f680" : "#ef444480";
-            flashScreen.zIndex = 999;
-            advancedTextureRef.current.addControl(flashScreen);
-
-            const goalText = new GUI.TextBlock();
-            goalText.text = t('gameUI.goal');
-            goalText.color = "white";
-            goalText.fontSize = isMobile ? 80 : 120;
-            goalText.fontWeight = "bold";
-            goalText.outlineWidth = isMobile ? 2 : 3;
-            goalText.outlineColor = "black";
-            goalText.shadowColor = "black";
-            goalText.shadowBlur = isMobile ? 5 : 10;
-            goalText.shadowOffsetX = isMobile ? 3 : 5;
-            goalText.shadowOffsetY = isMobile ? 3 : 5;
-            advancedTextureRef.current.addControl(goalText);
-
-            const teamText = new GUI.TextBlock();
-            teamText.text = team === 'left'
-                ? t('gameUI.mammalTeam')
-                : t('gameUI.reptileTeam');
-            teamText.color = team === 'left' ? "#3b82f6" : "#ef4444";
-            teamText.fontSize = isMobile ? 40 : 60;
-            teamText.fontWeight = "bold";
-            teamText.top = isMobile ? "60px" : "80px";
-            teamText.outlineWidth = isMobile ? 1 : 2;
-            teamText.outlineColor = "black";
-            advancedTextureRef.current.addControl(teamText);
-
-            let scaleStep = 0;
-            const scaleInterval = setInterval(() => {
-                scaleStep++;
-                const scaleAmount = isMobile ? 0.15 : 0.2;
-                goalText.scaleX = 1 + Math.sin(scaleStep * 0.2) * scaleAmount;
-                goalText.scaleY = 1 + Math.sin(scaleStep * 0.2) * scaleAmount;
-                if (scaleStep >= 20) clearInterval(scaleInterval);
-            }, 50);
-
-            setTimeout(() => {
-                flashScreen.dispose();
-                goalText.dispose();
-                teamText.dispose();
-            }, 1000);
-        });
-
-
-        // En Game.js, dentro del useEffect donde se configuran los sockets
-        socketRef.current.on('gameEnd', ({ reason, finalScore, winningTeam }) => {
-            setShowingEndMessage(true);
-            setSelectedCharacter(null);
-            setTeamSelected(false);
-            setCurrentTeam(null);
-
-            socketRef.current.emit('selectCharacter', { characterType: null });
-
-            // Limpiar visualización del personaje
-            const playerData = playersRef.current[socketRef.current.id];
-            if (playerData) {
-                characterManagerRef.current.removePlayer(socketRef.current.id);
-                delete playersRef.current[socketRef.current.id];
-            }
-
-            if (advancedTextureRef.current) {
-                const isBlueTeam = winningTeam === 'left';
-                const teamColor = isBlueTeam ? '#3b82f6' : '#ef4444';
-                const teamName = isBlueTeam
-                    ? t('gameUI.mammalTeam')
-                    : t('gameUI.reptileTeam');
-
-                const fullscreenBg = new GUI.Rectangle("fullscreenBg");
-                fullscreenBg.width = "100%";
-                fullscreenBg.height = "100%";
-                fullscreenBg.background = "rgba(0, 0, 0, 0.85)";
-                fullscreenBg.thickness = 0;
-                advancedTextureRef.current.addControl(fullscreenBg);
-
-                const victoryMessage = new GUI.Rectangle("victoryMessage");
-                victoryMessage.width = isMobile ? "90%" : "600px";
-                victoryMessage.height = isMobile ? "250px" : "300px";
-                victoryMessage.thickness = 2;
-                victoryMessage.color = teamColor;
-                victoryMessage.background = "rgba(0, 0, 0, 0.9)";
-                victoryMessage.cornerRadius = isMobile ? 15 : 20;
-                victoryMessage.shadowColor = teamColor;
-                victoryMessage.shadowBlur = isMobile ? 10 : 15;
-                advancedTextureRef.current.addControl(victoryMessage);
-
-                const titleText = new GUI.TextBlock();
-                titleText.text = t('gameUI.victory');
-                titleText.color = teamColor;
-                titleText.fontSize = isMobile ? 36 : 48;
-                titleText.fontFamily = "Arial";
-                titleText.fontWeight = "bold";
-                titleText.top = isMobile ? "-60px" : "-80px";
-                victoryMessage.addControl(titleText);
-
-                const subtitleText = new GUI.TextBlock();
-                subtitleText.text = teamName;
-                subtitleText.color = teamColor;
-                subtitleText.fontSize = isMobile ? 28 : 36;
-                subtitleText.fontFamily = "Arial";
-                subtitleText.fontWeight = "bold";
-                subtitleText.top = isMobile ? "-20px" : "-30px";
-                victoryMessage.addControl(subtitleText);
-
-                const line = new GUI.Rectangle("line");
-                line.width = isMobile ? "80%" : "400px";
-                line.height = "2px";
-                line.background = teamColor;
-                line.top = isMobile ? "5px" : "10px";
-                victoryMessage.addControl(line);
-
-                if (finalScore) {
-                    const scoreText = new GUI.TextBlock();
-                    scoreText.text = t('gameUI.finalScore');
-                    scoreText.color = "white";
-                    scoreText.fontSize = isMobile ? 20 : 24;
-                    scoreText.top = isMobile ? "30px" : "40px";
-                    victoryMessage.addControl(scoreText);
-
-                    const scoreNumbers = new GUI.TextBlock();
-                    scoreNumbers.text = `${finalScore.left} - ${finalScore.right}`;
-                    scoreNumbers.color = "white";
-                    scoreNumbers.fontSize = isMobile ? 48 : 64;
-                    scoreNumbers.fontWeight = "bold";
-                    scoreNumbers.top = isMobile ? "70px" : "90px";
-                    victoryMessage.addControl(scoreNumbers);
-                }
-
-                // Fade animations remain the same
-                victoryMessage.alpha = 0;
-                let alpha = 0;
-                const fadeIn = setInterval(() => {
-                    alpha += 0.05;
-                    victoryMessage.alpha = alpha;
-                    fullscreenBg.alpha = alpha;
-                    if (alpha >= 1) clearInterval(fadeIn);
-                }, 50);
-
-                setTimeout(() => {
-                    let alpha = 1;
-                    const fadeOut = setInterval(() => {
-                        alpha -= 0.05;
-                        victoryMessage.alpha = alpha;
-                        fullscreenBg.alpha = alpha;
-                        if (alpha <= 0) {
-                            clearInterval(fadeOut);
-                            if (advancedTextureRef.current) {
-                                victoryMessage.dispose();
-                                fullscreenBg.dispose();
-                            }
-                            setShowingEndMessage(false);
-                            setGameStarted(false);
-                            setGameInProgress(false);
-                        }
-                    }, 50);
-                }, 4500);
-            }
-        });
-
-        const handleKeyDown = (event) => {
-            if (chatInputFocusRef.current || isMobile) {
-                return;
-            }
-
-
-            console.log("Key pressed:", event.key);
-
-            let direction = null;
-            switch (event.key.toLowerCase()) { // Añadir toLowerCase()
-                case "arrowup":
-                case "w":
-                    direction = "up";
-                    break;
-                case "arrowdown":
-                case "s":
-                    direction = "down";
-                    break;
-                case "arrowleft":
-                case "a":
-                    direction = "left";
-                    break;
-                case "arrowright":
-                case "d":
-                    direction = "right";
-                    break;
-                case " ":
-                    console.log("Iniciando control del balón - Tecla espacio presionada");
-                    if (!event.repeat) { // Evitar repetición al mantener presionado
-                        socketRef.current.emit('ballControl', { control: true, shooting: false });
-                    }
-                    break;
-                default:
-                    break;
-            }
-            if (direction && socketRef.current) {
-                socketRef.current.volatile.emit('playerMoveStart', { direction });
+        // Manejador de redimensionamiento
+        const handleResize = () => {
+            if (engineRef.current) {
+                engineRef.current.resize();
             }
         };
 
-        const handleKeyUp = (event) => {
-            if (chatInputFocusRef.current || isMobile) {
-                return;
-            }
+        window.addEventListener('resize', handleResize);
 
-            let direction = null;
-            switch (event.key.toLowerCase()) { // Añadir toLowerCase()
-                case "arrowup":
-                case "w":
-                    direction = "up";
-                    break;
-                case "arrowdown":
-                case "s":
-                    direction = "down";
-                    break;
-                case "arrowleft":
-                case "a":
-                    direction = "left";
-                    break;
-                case "arrowright":
-                case "d":
-                    direction = "right";
-                    break;
-                case " ":
-                    socketRef.current.emit('ballControl', { control: false, shooting: true });
-                    break;
-
-                default:
-                    break;
-            }
-            if (direction && socketRef.current) {
-                socketRef.current.volatile.emit('playerMoveStop', { direction });
-            }
-        };
-
-
-        // Agregar manejador para cuando la ventana pierde el foco
-        const handleBlur = () => {
-            if (isMobile && socketRef.current) {
-                // Detener todos los movimientos cuando la ventana pierde el foco
-                ['up', 'down', 'left', 'right'].forEach(direction => {
-                    socketRef.current.volatile.emit('playerMoveStop', { direction });
-                });
-            }
-        };
-
-        // Agregar manejador para cuando el dispositivo cambia de orientación
-        const handleOrientationChange = () => {
-            if (isMobile && socketRef.current) {
-                // Detener todos los movimientos cuando el dispositivo rota
-                ['up', 'down', 'left', 'right'].forEach(direction => {
-                    socketRef.current.volatile.emit('playerMoveStop', { direction });
-                });
-            }
-        };
-
-        window.addEventListener('keydown', handleKeyDown);
-        window.addEventListener('keyup', handleKeyUp);
-        window.addEventListener('blur', handleBlur);
-        window.addEventListener('orientationchange', handleOrientationChange);;
-
+        // Función de limpieza mejorada
         return () => {
+            console.log(`Limpiando recursos de la sala ${roomId}`);
+
+            // Limpiar socket
+            if (socketRef.current) {
+                console.log(`Desconectando socket de la sala ${roomId}`);
+                socketRef.current.removeAllListeners();
+                socketRef.current.disconnect();
+                socketRef.current = null;
+            }
+
+            // Limpiar recursos de Babylon.js
             if (characterManagerRef.current) {
                 characterManagerRef.current.dispose();
+                characterManagerRef.current = null;
             }
+
+            if (sceneRef.current) {
+                sceneRef.current.dispose();
+                sceneRef.current = null;
+            }
+
             if (engineRef.current) {
+                engineRef.current.stopRenderLoop();
                 engineRef.current.dispose();
-            }
-            if (socketRef.current) {
-                socketRef.current.disconnect();
+                engineRef.current = null;
             }
 
+            // Limpiar efectos visuales
             if (controlEffectsRef.current) {
-                controlEffectsRef.current.particles.forEach(particle => particle.dispose());
-                controlEffectsRef.current.controlRing.dispose();
-                controlEffectsRef.current.ballHalo.dispose();
-                // El controlTimeText se limpiará con advancedTexture
+                const { particles, controlRing, ballHalo } = controlEffectsRef.current;
+
+                if (Array.isArray(particles)) {
+                    particles.forEach(particle => {
+                        if (particle && particle.dispose) {
+                            particle.dispose();
+                        }
+                    });
+                }
+
+                if (controlRing?.dispose) controlRing.dispose();
+                if (ballHalo?.dispose) ballHalo.dispose();
+
+                controlEffectsRef.current = null;
             }
 
+            // Limpiar event listeners
             window.removeEventListener('resize', handleResize);
             window.removeEventListener('keydown', handleKeyDown);
             window.removeEventListener('keyup', handleKeyUp);
             window.removeEventListener('blur', handleBlur);
             window.removeEventListener('orientationchange', handleOrientationChange);
         };
-    }, [createScene, updateGameState]);
+    }, [createScene, updateGameState, roomId]); // Añadir roomId como dependencia
 
     useEffect(() => {
         const checkMobile = () => {
