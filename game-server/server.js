@@ -780,6 +780,65 @@ io.on('connection', (socket) => {
     // No emitimos nada aquí, el estado se envía en el bucle principal
   });
 
+  // Manejador para cuando el jugador comienza a moverse en una dirección
+  socket.on('playerMoveStart', ({ direction }) => {
+    if (!currentRoomId) return;
+    const state = salaStates[currentRoomId];
+    const movementState = state.playerMovements.get(socket.id);
+    const player = state.players.get(socket.id);
+
+    // Ignorar si el jugador no existe, no tiene estado de movimiento, o el juego no está en PLAYING
+    if (!movementState || !player || state.currentGameState !== gameStates.PLAYING) return;
+
+    console.log(`[${currentRoomId}] -> playerMoveStart de ${player.name} en dirección: ${direction}`);
+
+    // Convertir la dirección a un vector de movimiento
+    let moveX = 0, moveZ = 0;
+    switch (direction) {
+      case 'up': moveZ = 1; break;
+      case 'down': moveZ = -1; break;
+      case 'left': moveX = -1; break;
+      case 'right': moveX = 1; break;
+      default: return; // Dirección no reconocida
+    }
+
+    // Actualizar la dirección de movimiento
+    movementState.moveDirection.x = moveX;
+    movementState.moveDirection.z = moveZ;
+
+    // Normalizar si es necesario
+    if (movementState.moveDirection.lengthSquared() > 0.001) {
+      movementState.moveDirection.normalize();
+    }
+  });
+
+  // Manejador para cuando el jugador deja de moverse en una dirección
+  socket.on('playerMoveStop', ({ direction }) => {
+    if (!currentRoomId) return;
+    const state = salaStates[currentRoomId];
+    const movementState = state.playerMovements.get(socket.id);
+    const player = state.players.get(socket.id);
+
+    // Ignorar si el jugador no existe o no tiene estado de movimiento
+    if (!movementState || !player) return;
+
+    console.log(`[${currentRoomId}] -> playerMoveStop de ${player.name} en dirección: ${direction}`);
+
+    // Detener el movimiento en la dirección especificada
+    switch (direction) {
+      case 'up':
+      case 'down':
+        movementState.moveDirection.z = 0;
+        break;
+      case 'left':
+      case 'right':
+        movementState.moveDirection.x = 0;
+        break;
+      default:
+        return; // Dirección no reconocida
+    }
+  });
+
   // Handler 'ballControl'
   socket.on('ballControl', ({ control }) => {
     if (!currentRoomId) return;
