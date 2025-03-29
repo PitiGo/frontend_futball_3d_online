@@ -9,19 +9,10 @@ services:
     networks:
       - game-network
 
-  sala1:
+  game-server:
     build: ./game-server
     ports:
       - "4000:4000"
-    environment:
-      - PORT=4000
-    networks:
-      - game-network
-
-  sala2:
-    build: ./game-server
-    ports:
-      - "4001:4000"
     environment:
       - PORT=4000
     networks:

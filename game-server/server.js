@@ -1,636 +1,962 @@
+// server.js - Refactorizado para gestión por sala
+
 import express from 'express';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
-import { Vector3, Quaternion } from '@babylonjs/core';
+import { Vector3, Quaternion, Matrix } from '@babylonjs/core'; // Añadir Matrix
 import cors from 'cors';
+import { performance } from 'perf_hooks'; // Para performance.now() en Node.js
 
 const app = express();
-app.use(cors());
+app.use(cors()); // Considera ser más específico si es necesario
+
+const httpServer = createServer(app);
+
+// Configuración de Socket.IO
+const io = new Server(httpServer, {
+  cors: {
+    origin: [ // Lista de orígenes permitidos
+      "https://football-online-3d.dantecollazzi.com",
+      "http://localhost:3000"       // Para desarrollo local del frontend
+    ],
+    methods: ["GET", "POST"],
+    credentials: true // Ajustar si es necesario
+  }
+  // proxy: true // Probablemente no necesario con la config Nginx correcta
+});
+
+// --- Constantes del Juego ---
+const availableSalas = ['room1', 'room2'];
+const FIELD_WIDTH = 40;
+const FIELD_HEIGHT = 30;
+const BALL_RADIUS = 0.5;
+const PLAYER_RADIUS = 0.5;
+const PLAYER_SPEED = 5; // Velocidad base (unidades por segundo)
+const GOAL_DEPTH = 7;
+const GOAL_Z_MIN = -GOAL_DEPTH / 2;
+const GOAL_Z_MAX = GOAL_DEPTH / 2;
+const BALL_MASS = 0.45;
+const PLAYER_MASS = 75; // Masa real
+const INV_BALL_MASS = 1 / BALL_MASS;
+const INV_PLAYER_MASS = 1 / PLAYER_MASS;
+const FRICTION = 0.985; // Coeficiente de fricción por tick (ajustado a DT)
+const RESTITUTION = 0.6; // Coeficiente de restitución (elasticidad)
+const MAX_PLAYERS_PER_TEAM = 3;
+const GOALS_TO_WIN = 3;
+const BALL_CONTROL_RADIUS = 1.5;
+const BALL_RELEASE_BOOST = 10; // Aumentado para disparos más notables
+const PHYSICS_TICK_RATE = 60; // Hz
+const PHYSICS_DT = 1 / PHYSICS_TICK_RATE; // Delta time para física
 
 const TEAM_CHARACTERS = {
   left: ['player', 'pig'],
   right: ['turtle', 'lizard']
 };
 
-const httpServer = createServer(app);
-const io = new Server(httpServer, {
-  cors: {
-    origin: "*",
-    methods: ["GET", "POST"]
-  },
-  proxy: true
-});
-
-// Constantes y estados del juego
-const MAX_PLAYERS_PER_TEAM = 3;
-const GOALS_TO_WIN = 3;
-const BALL_CONTROL_RADIUS = 1.5; // Radio de control del balón
-const BALL_CONTROL_FORCE = 0.8; // Qué tanto el jugador puede influir en el balón
-const BALL_RELEASE_BOOST = 0.8; // Multiplicador de velocidad al soltar el balón
-
-const teams = {
-  left: [],
-  right: []
-};
-
 const gameStates = {
   WAITING: 'waiting',
-  PLAYING: 'playing'
+  PLAYING: 'playing',
+  GOAL_SCORED: 'goal_scored', // Estado intermedio después de un gol
+  GAME_OVER: 'game_over'     // Estado cuando el juego ha terminado
 };
 
-let currentGameState = gameStates.WAITING;
-const players = new Map();
+// --- Estado del Juego por Sala ---
+const salaStates = {};
+availableSalas.forEach(roomId => {
+  salaStates[roomId] = {
+    players: new Map(), // Mapa de socket.id -> playerData
+    teams: { // Almacena solo IDs para referencia rápida
+      left: new Set(),
+      right: new Set()
+    },
+    readyState: { // Almacena solo IDs de jugadores listos
+      left: new Set(),
+      right: new Set()
+    },
+    currentGameState: gameStates.WAITING,
+    score: { left: 0, right: 0 },
+    ballPosition: new Vector3(0, BALL_RADIUS, 0), // Inicia en el suelo
+    ballVelocity: new Vector3(0, 0, 0),
+    lastUpdateTime: performance.now(),
+    goalScoredTimeout: null, // ID del temporizador para reiniciar tras gol
+    gameOverData: null,     // Datos del resultado final
+    gameLoopInterval: null, // ID del intervalo del bucle principal
+    playerMovements: new Map() // Mapa de socket.id -> { moveDirection: Vector3 }
+  };
+});
 
-// Configuración del campo y la física
-const FIELD_WIDTH = 40;
-const FIELD_HEIGHT = 30;
-const BALL_RADIUS = 0.5;
-const PLAYER_RADIUS = 0.5;
-const PLAYER_SPEED = 0.167;
-const GOAL_DEPTH = 7;
-const GOAL_Z_MIN = -GOAL_DEPTH / 2;
-const GOAL_Z_MAX = GOAL_DEPTH / 2;
-const BALL_MASS = 0.45;
-const PLAYER_MASS = 75;
-const FRICTION = 0.98;
-const RESTITUTION = 0.8;
 
-// Estado de la pelota y puntuación
-let ballPosition = new Vector3(0, 0.5, 0);
-let ballVelocity = new Vector3(0, 0, 0);
-let score = { left: 0, right: 0 };
+// --- Rutas API (Ej: Status) ---
+app.get('/:roomId/status', (req, res) => {
+  const { roomId } = req.params;
+  if (!salaStates[roomId]) {
+    return res.status(404).json({ error: 'Sala no encontrada' });
+  }
+  const state = salaStates[roomId];
+  const status = getTeamStatus(state); // Usa la función auxiliar
 
-// Funciones de utilidad
-function sanitizeMessage(message) {
-  const sanitized = message.replace(/<[^>]*>?/gm, '');
-  return sanitized
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#039;");
+  res.json({
+    playerCount: state.players.size,
+    players: Array.from(state.players.values()).map(p => ({
+      id: p.id,
+      name: p.name,
+      team: p.team,
+      characterType: p.characterType,
+      ready: p.ready,
+    })),
+    gameInProgress: state.currentGameState === gameStates.PLAYING,
+    score: state.score,
+    teams: status.teams,
+    readyState: status.readyState // Enviar nombres de jugadores listos
+  });
+});
+
+// --- Funciones de Utilidad ---
+function sanitizeInput(input, maxLength = 200) {
+  if (typeof input !== 'string') return '';
+  // Simple sanitization, considera librerías más robustas para producción
+  return input.replace(/</g, "<").replace(/>/g, ">").trim().slice(0, maxLength);
 }
 
-function vector3ToObject(vector) {
-  return { x: vector.x, y: vector.y, z: vector.z };
+function vector3ToObject(v) { return v ? { x: v.x, y: v.y, z: v.z } : { x: 0, y: 0, z: 0 }; }
+function quaternionToObject(q) { return q ? { x: q.x, y: q.y, z: q.z, w: q.w } : { x: 0, y: 0, z: 0, w: 1 }; }
+
+function getSpawnPosition(team) {
+  const side = team === 'left' ? -1 : 1;
+  return new Vector3(
+    side * FIELD_WIDTH / 4,
+    PLAYER_RADIUS, // Inicia en el suelo
+    (Math.random() - 0.5) * (FIELD_HEIGHT * 0.8)
+  );
 }
 
-function quaternionToObject(quaternion) {
-  return { x: quaternion.x, y: quaternion.y, z: quaternion.z, w: quaternion.w };
+function resetBall(state) {
+  state.ballPosition.set(0, BALL_RADIUS, 0);
+  state.ballVelocity.set(0, 0, 0);
 }
 
-function resetBall() {
-  ballPosition = new Vector3(0, 0.5, 0);
-  ballVelocity = new Vector3(0, 0, 0);
-}
-
-// Nueva función para reposicionar jugadores
-function resetPlayersPositions() {
-  players.forEach((player, id) => {
-    if (player.team === 'left') {
-      player.position = new Vector3(
-        -FIELD_WIDTH / 4,  // Cuarto izquierdo del campo
-        0.5,
-        (Math.random() * FIELD_HEIGHT - FIELD_HEIGHT / 2) * 0.8  // Posición Z aleatoria
-      );
-    } else if (player.team === 'right') {
-      player.position = new Vector3(
-        FIELD_WIDTH / 4,   // Cuarto derecho del campo
-        0.5,
-        (Math.random() * FIELD_HEIGHT - FIELD_HEIGHT / 2) * 0.8  // Posición Z aleatoria
-      );
+function resetPlayersPositions(roomId, state) {
+  console.log(`[${roomId}] Reposicionando jugadores.`);
+  state.players.forEach((player) => {
+    if (player.team) {
+      player.position = getSpawnPosition(player.team);
+    } else {
+      // Posición central si aún no tiene equipo (raro en este punto)
+      player.position.set(0, PLAYER_RADIUS, (Math.random() - 0.5) * 5);
     }
-    // Resetear velocidad y estado de control del balón
-    player.velocity = new Vector3(0, 0, 0);
+    player.velocity.set(0, 0, 0);
+    player.rotation.copyFromFloats(0, 0, 0, 1); // Mirando Z positivo
     player.isControllingBall = false;
     player.ballControlTime = 0;
+    // Asegurarse de que el estado de movimiento esté inicializado
+    if (!state.playerMovements.has(player.id)) {
+      state.playerMovements.set(player.id, { moveDirection: Vector3.Zero() });
+    } else {
+      state.playerMovements.get(player.id).moveDirection.set(0, 0, 0);
+    }
   });
+  // Emitir estado para que el cliente vea las nuevas posiciones inmediatamente
+  emitGameState(roomId, state);
 }
 
-function getWinningMessage(team) {
-  if (team === 'left') {
-    return '¡El EQUIPO MAMÍFEROS ha ganado el partido!';
-  } else {
-    return '¡El EQUIPO REPTILES ganado el partido!';
+
+// Devuelve información formateada para enviar al cliente
+function getTeamStatus(state) {
+  const getPlayerInfo = (id) => {
+    const p = state.players.get(id);
+    // Incluir 'ready' aquí también podría ser útil para la UI de equipos
+    return p ? { id: p.id, name: p.name, characterType: p.characterType, ready: p.ready } : null;
+  };
+
+  return {
+    teams: {
+      left: Array.from(state.teams.left).map(getPlayerInfo).filter(Boolean),
+      right: Array.from(state.teams.right).map(getPlayerInfo).filter(Boolean)
+    },
+    // readyState se envía por separado con readyUpdate para claridad
+  };
+}
+
+// Devuelve información de jugadores listos
+function getReadyPayload(state) {
+  const getReadyInfo = (id) => {
+    const p = state.players.get(id);
+    // Enviar solo info esencial para el estado 'listo'
+    return p ? { id: p.id, name: p.name, ready: p.ready } : null;
+  }
+  return {
+    left: Array.from(state.readyState.left).map(getReadyInfo).filter(Boolean),
+    right: Array.from(state.readyState.right).map(getReadyInfo).filter(Boolean)
   }
 }
 
-function checkVictory() {
-  if (score.left >= GOALS_TO_WIN) {
-    endGame(getWinningMessage('left'));
-    return true;
-  }
-  if (score.right >= GOALS_TO_WIN) {
-    endGame(getWinningMessage('right'));
+
+// --- Lógica de Inicio/Fin de Juego ---
+
+function checkStartGame(roomId, state) {
+  if (state.currentGameState !== gameStates.WAITING) return false;
+
+  const leftReadyCount = state.readyState.left.size;
+  const rightReadyCount = state.readyState.right.size;
+  const leftPlayerCount = state.teams.left.size;
+  const rightPlayerCount = state.teams.right.size;
+
+  // Condiciones para empezar: Al menos 1 jugador por equipo, y TODOS listos
+  if (leftPlayerCount > 0 && rightPlayerCount > 0 &&
+    leftReadyCount === leftPlayerCount && rightReadyCount === rightPlayerCount) {
+    console.log(`[${roomId}] ¡Iniciando juego!`);
+    startGame(roomId, state);
     return true;
   }
   return false;
 }
 
-function getReadyStatus() {
-  return {
-    left: teams.left.map(player => ({
-      id: player.id,
-      name: player.name,
-      ready: players.get(player.id)?.ready || false
-    })),
-    right: teams.right.map(player => ({
-      id: player.id,
-      name: player.name,
-      ready: players.get(player.id)?.ready || false
-    }))
-  };
+function startGame(roomId, state) {
+  state.currentGameState = gameStates.PLAYING;
+  state.score = { left: 0, right: 0 };
+  state.gameOverData = null; // Limpiar datos de juego anterior
+  resetBall(state);
+  resetPlayersPositions(roomId, state); // Pasar roomId para emitir estado inicial
+  io.to(roomId).emit('gameStart'); // Avisar a los clientes
+  io.to(roomId).emit('scoreUpdate', state.score); // Enviar score inicial
+
+  // Iniciar el bucle de física/juego si no está corriendo
+  if (!state.gameLoopInterval) {
+    state.lastUpdateTime = performance.now();
+    state.gameLoopInterval = setInterval(() => {
+      // Separar lógica de física y emisión
+      updateGamePhysics(roomId, state);
+      emitGameState(roomId, state);
+    }, 1000 / PHYSICS_TICK_RATE);
+    console.log(`[${roomId}] Bucle de juego iniciado para ${roomId}.`);
+  }
 }
 
-function checkGameStatus() {
-  if (currentGameState !== gameStates.PLAYING) {
+function stopGame(roomId, state, reason, finalScore, winningTeam) {
+  if (state.currentGameState === gameStates.GAME_OVER) return; // Evitar múltiples llamadas
+
+  console.log(`[${roomId}] Intentando detener juego. Razón: ${reason}`);
+  if (state.gameLoopInterval) {
+    clearInterval(state.gameLoopInterval);
+    state.gameLoopInterval = null;
+    console.log(`[${roomId}] Bucle de juego detenido para ${roomId}.`);
+  }
+
+  if (state.goalScoredTimeout) {
+    clearTimeout(state.goalScoredTimeout);
+    state.goalScoredTimeout = null;
+  }
+
+  state.currentGameState = gameStates.GAME_OVER;
+  state.gameOverData = { reason, finalScore, winningTeam, goalsToWin: GOALS_TO_WIN };
+
+  // Resetear estado 'listo' de jugadores
+  state.players.forEach(player => {
+    player.ready = false;
+    player.isControllingBall = false;
+  });
+  state.readyState.left.clear();
+  state.readyState.right.clear();
+
+  io.to(roomId).emit('gameOver', state.gameOverData);
+  console.log(`[${roomId}] Juego terminado: ${reason}`);
+
+  // Opcional: Programar un reinicio completo de la sala después de un tiempo
+  // setTimeout(() => resetFullRoomState(roomId, state), 15000); // 15 segundos
+}
+
+// Reinicia la sala al estado WAITING, manteniendo jugadores y equipos
+function resetFullRoomState(roomId, state) {
+  if (!state) return;
+  console.log(`[${roomId}] Reiniciando estado de sala a WAITING.`);
+
+  if (state.gameLoopInterval) {
+    clearInterval(state.gameLoopInterval);
+    state.gameLoopInterval = null;
+  }
+  if (state.goalScoredTimeout) {
+    clearTimeout(state.goalScoredTimeout);
+    state.goalScoredTimeout = null;
+  }
+
+  state.currentGameState = gameStates.WAITING;
+  state.score = { left: 0, right: 0 };
+  state.gameOverData = null;
+  resetBall(state);
+  state.readyState.left.clear();
+  state.readyState.right.clear();
+
+  // Reposicionar jugadores y resetear estado 'listo'
+  state.players.forEach(player => {
+    player.ready = false;
+    player.isControllingBall = false;
+    if (player.team) {
+      player.position = getSpawnPosition(player.team);
+    } else {
+      player.position.set(0, PLAYER_RADIUS, (Math.random() - 0.5) * 5);
+    }
+    player.velocity.set(0, 0, 0);
+    // Mantener personaje seleccionado
+  });
+
+  const status = getTeamStatus(state);
+  io.to(roomId).emit('teamUpdate', status.teams);
+  io.to(roomId).emit('readyUpdate', getReadyPayload(state)); // Enviar estado 'listo' vacío
+  io.to(roomId).emit('gameStateInfo', { currentState: state.currentGameState });
+  emitGameState(roomId, state); // Enviar estado inicial de posiciones
+}
+
+function handleGoal(roomId, state, scoringTeam) {
+  // Doble chequeo por si acaso
+  if (state.currentGameState !== gameStates.PLAYING) {
+    console.log(`[${roomId}] Intento de gol ignorado, estado actual: ${state.currentGameState}`);
     return;
   }
 
-  const leftTeamPlayers = teams.left.length;
-  const rightTeamPlayers = teams.right.length;
-  const totalPlayers = leftTeamPlayers + rightTeamPlayers;
+  state.currentGameState = gameStates.GOAL_SCORED; // Cambiar estado INMEDIATAMENTE
 
-  let shouldEndGame = false;
-  let endReason = '';
-
-  if (totalPlayers === 0) {
-    shouldEndGame = true;
-    endReason = 'No hay jugadores conectados';
-  } else if (leftTeamPlayers === 0) {
-    shouldEndGame = true;
-    endReason = 'El equipo azul se quedó sin jugadores';
-  } else if (rightTeamPlayers === 0) {
-    shouldEndGame = true;
-    endReason = 'El equipo rojo se quedó sin jugadores';
+  if (scoringTeam === 'left') {
+    state.score.left++;
+    console.log(`[${roomId}] Gol para equipo IZQUIERDO. Score: ${state.score.left}-${state.score.right}`);
+  } else {
+    state.score.right++;
+    console.log(`[${roomId}] Gol para equipo DERECHO. Score: ${state.score.left}-${state.score.right}`);
   }
 
-  if (shouldEndGame) {
-    endGame(endReason);
+  io.to(roomId).emit('goalScored', { team: scoringTeam, score: state.score });
+
+  // Comprobar victoria ANTES de reiniciar
+  if (state.score.left >= GOALS_TO_WIN) {
+    stopGame(roomId, state, getWinningMessage('left'), { ...state.score }, 'left');
+    return; // Importante: salir para no programar el reinicio
   }
+  if (state.score.right >= GOALS_TO_WIN) {
+    stopGame(roomId, state, getWinningMessage('right'), { ...state.score }, 'right');
+    return; // Importante: salir para no programar el reinicio
+  }
+
+  // Si no hay victoria, programar reinicio
+  console.log(`[${roomId}] Gol anotado, pausando para reinicio...`);
+  // Limpiar timeout anterior por si acaso (aunque el cambio de estado debería prevenirlo)
+  if (state.goalScoredTimeout) clearTimeout(state.goalScoredTimeout);
+
+  state.goalScoredTimeout = setTimeout(() => {
+    // Solo reiniciar si seguimos en estado GOAL_SCORED (no GAME_OVER)
+    if (state.currentGameState === gameStates.GOAL_SCORED) {
+      console.log(`[${roomId}] Reiniciando juego después de gol.`);
+      resetBall(state);
+      resetPlayersPositions(roomId, state); // Pasar roomId
+      state.currentGameState = gameStates.PLAYING; // Reanudar juego
+      io.to(roomId).emit('gameStateInfo', { currentState: state.currentGameState }); // Notificar reanudación
+      state.goalScoredTimeout = null;
+    } else {
+      console.log(`[${roomId}] Reinicio cancelado, estado del juego ya es ${state.currentGameState}`);
+    }
+  }, 3000); // 3 segundos de pausa
 }
 
-// En server.js
-function endGame(reason) {
-  currentGameState = gameStates.WAITING;
-  const finalScore = { ...score };
-  score = { left: 0, right: 0 };
-  resetBall();
-
-  // Determinar el equipo ganador basado en la razón o el puntaje
-  const winningTeam = reason.includes('MAMÍFEROS') ? 'left' : 'right';
-
-  // Limpiar estado de jugadores y equipos
-  teams.left.forEach(player => {
-    const playerData = players.get(player.id);
-    if (playerData) {
-      playerData.ready = false;
-      playerData.characterType = null;
-      playerData.position = new Vector3(-FIELD_WIDTH / 4, 0.5,
-        (Math.random() * FIELD_HEIGHT - FIELD_HEIGHT / 2) * 0.8);
-    }
-  });
-
-  teams.right.forEach(player => {
-    const playerData = players.get(player.id);
-    if (playerData) {
-      playerData.ready = false;
-      playerData.characterType = null;
-      playerData.position = new Vector3(FIELD_WIDTH / 4, 0.5,
-        (Math.random() * FIELD_HEIGHT - FIELD_HEIGHT / 2) * 0.8);
-    }
-  });
-
-  // Emitir actualización completa de estado
-  const gameEndData = {
-    currentState: currentGameState,
-    reason: reason,
-    finalScore,
-    goalsToWin: GOALS_TO_WIN,
-    winningTeam: winningTeam,  // Añadir explícitamente el equipo ganador
-    players: Array.from(players.values()).map(player => ({
-      id: player.id,
-      name: player.name,
-      team: player.team,
-      characterType: player.characterType,
-      ready: player.ready
-    }))
-  };
-
-  io.emit('gameEnd', gameEndData);
-}
-function updateGameState() {
-  if (currentGameState !== gameStates.PLAYING) {
-    return;
-  }
-
-  // Verificar goles
-  if (ballPosition.x < -FIELD_WIDTH / 2 + BALL_RADIUS) {
-    if (ballPosition.z >= GOAL_Z_MIN && ballPosition.z <= GOAL_Z_MAX) {
-      score.right++;
-      console.log(`Gol para el equipo derecho. Puntuación: ${score.left} - ${score.right}`);
-      io.emit('goalScored', {
-        team: 'right',
-        score: score
-      });
-
-      if (checkVictory()) return;
-      resetBall();
-      resetPlayersPositions();
-      return;
-    }
-  } else if (ballPosition.x > FIELD_WIDTH / 2 - BALL_RADIUS) {
-    if (ballPosition.z >= GOAL_Z_MIN && ballPosition.z <= GOAL_Z_MAX) {
-      score.left++;
-      console.log(`Gol para el equipo izquierdo. Puntuación: ${score.left} - ${score.right}`);
-      io.emit('goalScored', {
-        team: 'left',
-        score: score
-      });
-
-      if (checkVictory()) return;
-      resetBall();
-      resetPlayersPositions(); 
-      return;
-    }
-  }
-
-  // Actualizar posición de la pelota
-  ballPosition = ballPosition.add(ballVelocity);
-
-  // Rebotes en las paredes
-  if (Math.abs(ballPosition.x) > FIELD_WIDTH / 2 - BALL_RADIUS) {
-    if (ballPosition.z < GOAL_Z_MIN || ballPosition.z > GOAL_Z_MAX) {
-      ballVelocity.x *= -RESTITUTION;
-      ballPosition.x = Math.sign(ballPosition.x) * (FIELD_WIDTH / 2 - BALL_RADIUS);
-    }
-  }
-
-  if (Math.abs(ballPosition.z) > FIELD_HEIGHT / 2 - BALL_RADIUS) {
-    ballVelocity.z *= -RESTITUTION;
-    ballPosition.z = Math.sign(ballPosition.z) * (FIELD_HEIGHT / 2 - BALL_RADIUS);
-  }
-
-  // Aplicar fricción
-  ballVelocity = ballVelocity.scale(FRICTION);
-
-  // Colisiones jugador-pelota
-  players.forEach((player) => {
-    const distanceToPlayer = Vector3.Distance(player.position, ballPosition);
-    const KICK_RADIUS = PLAYER_RADIUS + BALL_RADIUS + 0.3; // Radio para patear
-    const controlRadius = player.isControllingBall ? BALL_CONTROL_RADIUS : (PLAYER_RADIUS + BALL_RADIUS);
-
-    if (distanceToPlayer < controlRadius) {
-      if (player.isControllingBall) {
-        const controlDuration = (Date.now() - player.ballControlTime) / 1000;
-        if (controlDuration >= 3) {
-          player.isControllingBall = false;
-          const randomVelocity = new Vector3(
-            (Math.random() - 0.5) * 1.5,
-            0,
-            (Math.random() - 0.5) * 1.5
-          );
-
-          // Añadir el impulso basado en la velocidad del jugador
-          const playerVelocityComponent = player.velocity.scale(0.8);
-          ballVelocity = randomVelocity.add(playerVelocityComponent);
-        } else {
-          let direction;
-          if (player.velocity.length() > 0.01) {
-            direction = player.velocity.normalize();
-          } else {
-            direction = new Vector3(
-              Math.cos(player.rotation.y),
-              0,
-              Math.sin(player.rotation.y)
-            );
-          }
-
-          const idealPosition = player.position.add(
-            direction.scale(PLAYER_RADIUS + BALL_RADIUS + 0.5)
-          );
-
-          ballPosition = Vector3.Lerp(ballPosition, idealPosition, 0.2);
-          ballVelocity = Vector3.Zero();
-        }
+function checkPlayerOutOfBounds(state, roomId) {
+  state.players.forEach(player => {
+    if (Math.abs(player.position.x) > FIELD_WIDTH / 2 + 2 || Math.abs(player.position.z) > FIELD_HEIGHT / 2 + 2) {
+      console.warn(`[${roomId}] Jugador ${player.name} fuera de límites, reposicionando.`);
+      if (player.team) {
+        player.position = getSpawnPosition(player.team);
       } else {
-        // Colisión normal
-        const collisionNormal = ballPosition.subtract(player.position).normalize();
-        const relativeVelocity = ballVelocity.subtract(player.velocity);
-        const impulseStrength = -(1 + RESTITUTION) * Vector3.Dot(relativeVelocity, collisionNormal) /
-          (1 / BALL_MASS + 1 / PLAYER_MASS);
+        player.position.set(0, PLAYER_RADIUS, 0);
+      }
+      player.velocity.set(0, 0, 0);
+      // Considerar emitir estado aquí si es un cambio importante
+    }
+  });
+}
 
-        const impulse = collisionNormal.scale(impulseStrength * 1.2);
-        ballVelocity = ballVelocity.add(impulse.scale(1 / BALL_MASS));
-        player.velocity = player.velocity.subtract(impulse.scale(1 / PLAYER_MASS));
+// --- Bucle Principal de Física y Lógica ---
+function updateGamePhysics(roomId, state) {
+  const now = performance.now();
+  // Usar PHYSICS_DT directamente para la física, deltaTime solo para referencia o lógica no física
+  // const deltaTime = Math.min((now - state.lastUpdateTime) / 1000, PHYSICS_DT * 3); // Clamp para evitar saltos grandes
+  state.lastUpdateTime = now;
+
+  if (state.currentGameState !== gameStates.PLAYING) {
+    return; // No actualizar física si no se está jugando activamente
+  }
+
+  // 1. Actualizar Jugadores
+  state.players.forEach(player => {
+    const movement = state.playerMovements.get(player.id);
+    if (!movement || !player.team) return;
+
+    // Aplicar velocidad instantánea basada en input (más responsivo)
+    // Podríamos añadir aceleración/inercia si quisiéramos
+    player.velocity.copyFrom(movement.moveDirection).scaleInPlace(PLAYER_SPEED);
+
+    // Integración de Euler simple
+    player.position.addInPlace(player.velocity.scale(PHYSICS_DT));
+
+    // Colisiones con bordes
+    if (player.position.x < -FIELD_WIDTH / 2 + PLAYER_RADIUS) {
+      player.position.x = -FIELD_WIDTH / 2 + PLAYER_RADIUS; player.velocity.x = 0;
+    } else if (player.position.x > FIELD_WIDTH / 2 - PLAYER_RADIUS) {
+      player.position.x = FIELD_WIDTH / 2 - PLAYER_RADIUS; player.velocity.x = 0;
+    }
+    if (player.position.z < -FIELD_HEIGHT / 2 + PLAYER_RADIUS) {
+      player.position.z = -FIELD_HEIGHT / 2 + PLAYER_RADIUS; player.velocity.z = 0;
+    } else if (player.position.z > FIELD_HEIGHT / 2 - PLAYER_RADIUS) {
+      player.position.z = FIELD_HEIGHT / 2 - PLAYER_RADIUS; player.velocity.z = 0;
+    }
+    player.position.y = PLAYER_RADIUS; // Mantener en el suelo
+
+    // Rotación (Mirar en la dirección del movimiento)
+    if (movement.moveDirection.lengthSquared() > 0.01) { // Usar input para rotación más directa
+      const angle = Math.atan2(movement.moveDirection.x, movement.moveDirection.z);
+      Quaternion.FromEulerAnglesToRef(0, angle, 0, player.rotation);
+    }
+  });
+
+  // 2. Actualizar Pelota
+  // Aplicar fricción
+  state.ballVelocity.scaleInPlace(Math.pow(FRICTION, PHYSICS_DT / (1 / 60))); // Ajustar a DT
+
+  // Integración de Euler
+  state.ballPosition.addInPlace(state.ballVelocity.scale(PHYSICS_DT));
+
+  // Colisiones con bordes y Goles
+  let scored = false;
+  if (Math.abs(state.ballPosition.x) >= FIELD_WIDTH / 2 - BALL_RADIUS) {
+    if (state.ballPosition.z >= GOAL_Z_MIN && state.ballPosition.z <= GOAL_Z_MAX && state.ballPosition.y < 3) { // Añadir chequeo de altura
+      const scoringTeam = state.ballPosition.x > 0 ? 'left' : 'right';
+      handleGoal(roomId, state, scoringTeam);
+      scored = true; // Marcar que se anotó para no procesar rebote
+    } else {
+      // Rebote pared lateral
+      state.ballPosition.x = Math.sign(state.ballPosition.x) * (FIELD_WIDTH / 2 - BALL_RADIUS);
+      state.ballVelocity.x *= -RESTITUTION;
+    }
+  }
+  if (!scored && Math.abs(state.ballPosition.z) >= FIELD_HEIGHT / 2 - BALL_RADIUS) {
+    state.ballPosition.z = Math.sign(state.ballPosition.z) * (FIELD_HEIGHT / 2 - BALL_RADIUS);
+    state.ballVelocity.z *= -RESTITUTION;
+  }
+  // Colisión con suelo
+  if (state.ballPosition.y < BALL_RADIUS) {
+    state.ballPosition.y = BALL_RADIUS;
+    if (state.ballVelocity.y < 0) {
+      state.ballVelocity.y *= -RESTITUTION * 0.5; // Rebote menor
+      // Frenar X/Z en rebote suelo
+      state.ballVelocity.x *= 0.95;
+      state.ballVelocity.z *= 0.95;
+    }
+  }
+  // Si el juego ya no está en PLAYING (porque handleGoal cambió el estado), salir
+  if (state.currentGameState !== gameStates.PLAYING) return;
+
+
+  // 3. Colisiones Jugador-Pelota y Control
+  let playerCurrentlyControllingId = null;
+  state.players.forEach(p => { if (p.isControllingBall) playerCurrentlyControllingId = p.id; });
+
+  state.players.forEach(player => {
+    if (!player.team) return;
+
+    const vecToBall = state.ballPosition.subtract(player.position);
+    const distSq = vecToBall.lengthSquared();
+    const combinedRadius = PLAYER_RADIUS + BALL_RADIUS;
+    const combinedRadiusSq = combinedRadius * combinedRadius;
+
+    // Lógica de Control Activo
+    if (player.isControllingBall) {
+      if (player.id !== playerCurrentlyControllingId) {
+        // Esto no debería pasar si solo uno controla, pero por seguridad:
+        player.isControllingBall = false;
+        return;
+      }
+
+      const controlDuration = (performance.now() - player.ballControlTime) / 1000;
+      if (controlDuration >= 3) {
+        console.log(`[${roomId}] ${player.name} pierde control por tiempo.`);
+        player.isControllingBall = false;
+        playerCurrentlyControllingId = null; // Liberar control
+        state.ballVelocity.set((Math.random() - 0.5) * 2, 0, (Math.random() - 0.5) * 2);
+      } else {
+        // Mantener pelota al frente
+        const forward = new Vector3(0, 0, 1); // Local Z+
+        const rotationMatrix = new Matrix();
+        player.rotation.toRotationMatrix(rotationMatrix); // Usar rotación del jugador
+        const worldForward = Vector3.TransformNormal(forward, rotationMatrix).normalize();
+
+        const targetBallPos = player.position.add(worldForward.scale(PLAYER_RADIUS + BALL_RADIUS + 0.1));
+        targetBallPos.y = BALL_RADIUS;
+        state.ballPosition = Vector3.Lerp(state.ballPosition, targetBallPos, 0.35); // Un poco más rápido
+        state.ballVelocity.set(0, 0, 0);
+      }
+    }
+    // Colisión Física (si NADIE la controla o si choca con otro jugador)
+    else if (distSq < combinedRadiusSq) {
+      // console.log(`[${roomId}] Colisión física: ${player.name}`); // Log spam
+      const normal = vecToBall.normalize();
+      const relativeVelocity = state.ballVelocity.subtract(player.velocity);
+      const velocityAlongNormal = Vector3.Dot(relativeVelocity, normal);
+
+      if (velocityAlongNormal < 0) { // Solo si se acercan
+        const impulseMagnitude = -(1 + RESTITUTION) * velocityAlongNormal / (INV_BALL_MASS + INV_PLAYER_MASS);
+        const impulse = normal.scale(impulseMagnitude);
+        state.ballVelocity.addInPlace(impulse.scale(INV_BALL_MASS));
+        // player.velocity.subtractInPlace(impulse.scale(INV_PLAYER_MASS)); // El jugador se ve menos afectado
+
+        // Separación
+        const overlap = combinedRadius - Math.sqrt(distSq);
+        if (overlap > 0) {
+          const separation = normal.scale(overlap * 0.51); // 0.51 para asegurar separación
+          state.ballPosition.addInPlace(separation);
+          // player.position.subtractInPlace(separation);
+        }
       }
     }
   });
 
-  // Limitar velocidad de la pelota
-  const MAX_BALL_SPEED = 1;
-  if (ballVelocity.length() > MAX_BALL_SPEED) {
-    ballVelocity = ballVelocity.normalize().scale(MAX_BALL_SPEED);
+  // 4. Limitar Velocidades y Detener Pelota
+  const maxBallSpeedSq = 20 * 20; // Aumentar velocidad máxima
+  if (state.ballVelocity.lengthSquared() > maxBallSpeedSq) {
+    state.ballVelocity.normalize().scaleInPlace(Math.sqrt(maxBallSpeedSq));
+  }
+  if (state.ballVelocity.lengthSquared() < 0.05 * 0.05 && state.ballPosition.y === BALL_RADIUS) {
+    state.ballVelocity.set(0, 0, 0); // Detener si es muy lenta en el suelo
   }
 
-  // Actualizar posiciones de jugadores
-  // En el bucle updateGameState, dentro del manejo de movimiento del jugador
-  players.forEach((player) => {
-    let playerVelocity = new Vector3(0, 0, 0);
-    const speedMultiplier = 1;
-    const diagonalMultiplier = 0.707; // Aproximadamente 1/√2
+  // 5. Verificar Out of Bounds (Opcional)
+  // checkPlayerOutOfBounds(state, roomId);
 
-    // Manejo de direcciones diagonales
-    switch (player.movement.direction) {
-      case 'up-right':
-        playerVelocity.z += PLAYER_SPEED * diagonalMultiplier;
-        playerVelocity.x += PLAYER_SPEED * diagonalMultiplier;
-        break;
-      case 'up-left':
-        playerVelocity.z += PLAYER_SPEED * diagonalMultiplier;
-        playerVelocity.x -= PLAYER_SPEED * diagonalMultiplier;
-        break;
-      case 'down-right':
-        playerVelocity.z -= PLAYER_SPEED * diagonalMultiplier;
-        playerVelocity.x += PLAYER_SPEED * diagonalMultiplier;
-        break;
-      case 'down-left':
-        playerVelocity.z -= PLAYER_SPEED * diagonalMultiplier;
-        playerVelocity.x -= PLAYER_SPEED * diagonalMultiplier;
-        break;
-      default:
-        // Movimientos originales
-        if (player.movement.up) playerVelocity.z += PLAYER_SPEED;
-        if (player.movement.down) playerVelocity.z -= PLAYER_SPEED;
-        if (player.movement.left) playerVelocity.x -= PLAYER_SPEED;
-        if (player.movement.right) playerVelocity.x += PLAYER_SPEED;
-    }
+} // Fin de updateGamePhysics
 
-    player.position = player.position.add(playerVelocity);
-    player.velocity = playerVelocity.clone();
 
-    // Limitar posición dentro del campo
-    player.position.x = Math.max(Math.min(player.position.x, FIELD_WIDTH / 2 - PLAYER_RADIUS), -FIELD_WIDTH / 2 + PLAYER_RADIUS);
-    player.position.z = Math.max(Math.min(player.position.z, FIELD_HEIGHT / 2 - PLAYER_RADIUS), -FIELD_HEIGHT / 2 + PLAYER_RADIUS);
-  });
+// --- Emisión de Estado ---
+function emitGameState(roomId, state) {
+  // Crear payload solo con datos necesarios para el cliente
+  const playersData = Array.from(state.players.values()).map(p => ({
+    id: p.id,
+    name: p.name,
+    team: p.team,
+    characterType: p.characterType,
+    position: vector3ToObject(p.position),
+    rotation: quaternionToObject(p.rotation),
+    isMoving: state.playerMovements.get(p.id)?.moveDirection.lengthSquared() > 0.01,
+    isControllingBall: p.isControllingBall,
+    // ready: p.ready // Podría ser útil para la UI
+  }));
 
-  // Emitir estado del juego
-  const gameState = {
-    players: Array.from(players.values()).map(player => ({
-      id: player.id,
-      name: player.name,
-      position: vector3ToObject(player.position),
-      rotation: quaternionToObject(player.rotation),
-      isMoving: player.movement.up || player.movement.down || player.movement.left || player.movement.right,
-      team: player.team,
-      characterType: player.characterType,
-      isControllingBall: player.isControllingBall,  // Asegúrate de que esta línea esté presente
-      ballControlTime: player.isControllingBall ? player.ballControlTime : null
-    })),
-    ballPosition: vector3ToObject(ballPosition),
-    score: score,
-    connectedPlayers: Array.from(players.values()).map(player => ({
-      id: player.id,
-      name: player.name,
-      team: player.team,
-      characterType: player.characterType
-    }))
+  const gameStatePayload = {
+    players: playersData,
+    ballPosition: vector3ToObject(state.ballPosition),
+    score: state.score,
+    currentState: state.currentGameState // Enviar estado para UI cliente
   };
 
-  io.emit('gameStateUpdate', gameState);
+  // Emitir a la sala específica
+  io.to(roomId).volatile.emit('gameStateUpdate', gameStatePayload);
 }
 
-// Iniciar el bucle del juego
-setInterval(updateGameState, 1000 / 60);
 
-// Manejo de conexiones
+// --- Manejadores de Eventos de Socket.IO ---
 io.on('connection', (socket) => {
-  console.log(`Nuevo cliente conectado: ${socket.id}`);
+  console.log(`++ Cliente conectado: ${socket.id}`);
+  let currentRoomId = null; // ID de la sala para este socket
 
-  socket.emit('teamUpdate', teams);
-  socket.emit('gameStateInfo', { currentState: currentGameState });
+  // Handler 'joinGame'
+  socket.on('joinGame', ({ name, roomId }) => {
+    console.log(`[${roomId || 'N/A'}] -> joinGame de ${socket.id} (${name})`);
 
-  socket.on('joinGame', (playerData) => {
-    const { name } = playerData;
-
-    if (typeof name !== 'string' || name.trim() === '') {
-      socket.emit('error', { message: 'Nombre inválido' });
-      return;
+    // Validaciones
+    if (!roomId || !availableSalas.includes(roomId)) {
+      console.error(`[${roomId || 'N/A'}] Error joinGame: Sala inválida '${roomId}'`);
+      return socket.emit('joinError', { message: 'Sala inválida.' });
+    }
+    const state = salaStates[roomId];
+    if (!state) {
+      console.error(`[${roomId}] Error joinGame: Estado de sala no encontrado.`);
+      return socket.emit('joinError', { message: 'Error interno del servidor.' });
+    }
+    const sanitizedName = sanitizeInput(name, 15); // Limitar nombre
+    if (!sanitizedName) {
+      console.error(`[${roomId}] Error joinGame: Nombre inválido.`);
+      return socket.emit('joinError', { message: 'Nombre inválido o vacío.' });
+    }
+    // Evitar unirse si el nombre ya está en uso en esa sala
+    let nameExists = false;
+    state.players.forEach(p => { if (p.name === sanitizedName) nameExists = true; });
+    if (nameExists) {
+      console.error(`[${roomId}] Error joinGame: Nombre "${sanitizedName}" ya en uso.`);
+      return socket.emit('joinError', { message: `El nombre "${sanitizedName}" ya está en uso.` });
     }
 
-    if (currentGameState === gameStates.PLAYING) {
-      socket.emit('gameInProgress');
-      return;
+    // Rechazar si el juego está lleno (considerando equipos) o en progreso?
+    // if (state.players.size >= MAX_PLAYERS_PER_TEAM * 2) {
+    //    return socket.emit('joinError', { message: 'La sala está llena.' });
+    // }
+    if (state.currentGameState === gameStates.PLAYING) {
+      console.log(`[${roomId}] Aviso joinGame: Juego en progreso para ${sanitizedName}.`);
+      // Permitir unirse pero informar que está en progreso
+      // socket.emit('gameInProgress', { score: state.score });
+      // O podrías rechazar:
+      // return socket.emit('joinError', { message: 'Partida en curso, inténtalo más tarde.' });
     }
 
-    players.set(socket.id, {
+
+    // Unir socket a la sala y almacenar roomId
+    socket.join(roomId);
+    currentRoomId = roomId; // Asociar este socket a la sala
+
+    // Crear datos completos del jugador
+    const playerData = {
       id: socket.id,
-      name: name,
+      name: sanitizedName,
       team: null,
       characterType: null,
-      position: new Vector3(0, 0.5, 0),
-      rotation: new Quaternion(),
-      movement: { up: false, down: false, left: false, right: false },
+      position: new Vector3(0, PLAYER_RADIUS, (Math.random() - 0.5) * 5), // Posición inicial antes de equipo
+      rotation: new Quaternion(0, 0, 0, 1), // Rotación inicial
       velocity: new Vector3(0, 0, 0),
       ready: false,
       isControllingBall: false,
-      ballControlTime: 0
-    });
+      ballControlTime: 0,
+      roomId: roomId // Referencia a su sala
+    };
+    state.players.set(socket.id, playerData);
+    state.playerMovements.set(socket.id, { moveDirection: Vector3.Zero() });
 
-    console.log(`Jugador ${name} agregado con ID ${socket.id}`);
+    console.log(`[${roomId}] Jugador ${sanitizedName} (${socket.id}) añadido y unido.`);
 
-    socket.emit('teamUpdate', teams);
-    io.emit('playersListUpdate', Array.from(players.values()).map(player => ({
-      id: player.id,
-      name: player.name,
-      characterType: player.characterType
+    // Enviar confirmación y estado actual al nuevo jugador
+    socket.emit('gameJoined', { id: socket.id, name: sanitizedName, roomId: roomId });
+    const status = getTeamStatus(state);
+    socket.emit('teamUpdate', status.teams);
+    socket.emit('readyUpdate', getReadyPayload(state)); // Enviar estado listo actual
+    socket.emit('gameStateInfo', { currentState: state.currentGameState, score: state.score });
+    if (state.gameOverData) {
+      socket.emit('gameOver', state.gameOverData); // Informar si el juego anterior terminó
+    }
+
+
+    // Notificar a todos en la sala (incluido el nuevo)
+    io.to(roomId).emit('playersListUpdate', Array.from(state.players.values()).map(p => ({
+      id: p.id, name: p.name, team: p.team, characterType: p.characterType
     })));
+    // Enviar estado de juego actual a todos para sincronizar nuevas posiciones/estado
+    emitGameState(roomId, state);
+
   });
 
+  // Handler 'selectTeam'
+  socket.on('selectTeam', ({ team }) => {
+    if (!currentRoomId) return console.error(`[${socket.id}] Error selectTeam: Socket no está en una sala.`);
+    const state = salaStates[currentRoomId];
+    const player = state.players.get(socket.id);
+
+    console.log(`[${currentRoomId}] -> selectTeam de ${player?.name || socket.id}. Equipo: ${team}`);
+
+    if (!player) return console.error(`[${currentRoomId}] Error selectTeam: Jugador ${socket.id} no encontrado.`);
+    if (team !== 'left' && team !== 'right') return socket.emit('selectTeamError', { message: 'Equipo inválido' });
+    if (state.teams[team].size >= MAX_PLAYERS_PER_TEAM && !state.teams[team].has(socket.id)) {
+      return socket.emit('selectTeamError', { message: 'Este equipo está lleno' });
+    }
+    // Permitir cambio de equipo solo si el juego no ha empezado
+    if (state.currentGameState !== gameStates.WAITING && state.currentGameState !== gameStates.GAME_OVER) {
+      return socket.emit('selectTeamError', { message: 'No puedes cambiar de equipo ahora.' });
+    }
+
+    // Quitar del equipo y estado 'listo' anterior
+    if (player.team && state.teams[player.team]) {
+      state.teams[player.team].delete(socket.id);
+      state.readyState[player.team].delete(socket.id);
+      player.ready = false; // Asegurar que no está listo
+    }
+
+    // Asignar nuevo equipo y posición
+    player.team = team;
+    state.teams[team].add(socket.id);
+    player.position = getSpawnPosition(team);
+    player.characterType = null; // Resetear personaje al cambiar de equipo
+    player.ready = false; // Asegurar que no está listo
+
+    console.log(`[${currentRoomId}] Jugador ${player.name} movido al equipo ${team}.`);
+
+    // Emitir actualizaciones a la sala
+    const status = getTeamStatus(state);
+    io.to(currentRoomId).emit('teamUpdate', status.teams);
+    io.to(currentRoomId).emit('readyUpdate', getReadyPayload(state));
+    socket.emit('teamSelected', { team }); // Confirmación individual
+    // Enviar actualización completa para reflejar cambio de equipo/personaje/posición
+    emitGameState(currentRoomId, state);
+
+  });
+
+  // Handler 'selectCharacter'
   socket.on('selectCharacter', ({ characterType }) => {
-    const player = players.get(socket.id);
-    if (!player) {
-      socket.emit('error', { message: 'Jugador no encontrado' });
-      return;
-    }
+    if (!currentRoomId) return console.error(`[${socket.id}] Error selectCharacter: Socket no está en una sala.`);
+    const state = salaStates[currentRoomId];
+    const player = state.players.get(socket.id);
 
-    if (!player.team && characterType !== null) {
-      socket.emit('error', { message: 'Debes seleccionar un equipo primero' });
-      return;
-    }
+    console.log(`[${currentRoomId}] -> selectCharacter de ${player?.name || socket.id}. Personaje: ${characterType}`);
 
-    // Permitir null para deseleccionar, o validar el personaje si se está seleccionando uno
-    if (characterType !== null && !TEAM_CHARACTERS[player.team].includes(characterType)) {
-      socket.emit('error', { message: 'Personaje no disponible para este equipo' });
-      return;
+    if (!player) return console.error(`[${currentRoomId}] Error selectCharacter: Jugador ${socket.id} no encontrado.`);
+    if (!player.team) return socket.emit('selectCharacterError', { message: 'Selecciona un equipo primero.' });
+    if (player.ready) return socket.emit('selectCharacterError', { message: 'Cancela tu estado "Listo" para cambiar.' });
+
+    // Permitir deseleccionar (null)
+    const isValid = characterType === null || TEAM_CHARACTERS[player.team].includes(characterType);
+    if (!isValid) {
+      return socket.emit('selectCharacterError', { message: 'Personaje no válido para tu equipo.' });
     }
 
     player.characterType = characterType;
-    console.log(`Jugador ${player.name} ${characterType ? 'seleccionó' : 'deseleccionó'} el personaje: ${characterType}`);
+    console.log(`[${currentRoomId}] Jugador ${player.name} personaje actualizado a: ${characterType}`);
 
-    io.emit('playerUpdate', {
-      id: socket.id,
-      name: player.name,
-      characterType: characterType,
-      team: player.team
+    // Notificar a todos (teamUpdate ahora incluye characterType)
+    const status = getTeamStatus(state);
+    io.to(currentRoomId).emit('teamUpdate', status.teams);
+    socket.emit('characterSelected', { characterType }); // Confirmar al jugador
+  });
+
+  // Handler 'toggleReady'
+  socket.on('toggleReady', () => {
+    if (!currentRoomId) return console.error(`[${socket.id}] Error toggleReady: Socket no está en una sala.`);
+    const state = salaStates[currentRoomId];
+    const player = state.players.get(socket.id);
+
+    console.log(`[${currentRoomId}] -> toggleReady de ${player?.name || socket.id}.`);
+
+    if (!player || !player.team) return console.error(`[${currentRoomId}] Error toggleReady: Jugador no encontrado o sin equipo.`);
+    // Requerir personaje para estar listo
+    if (!player.characterType && !player.ready) { // Si intenta ponerse listo sin personaje
+      return socket.emit('readyError', { message: 'Debes seleccionar un personaje.' });
+    }
+    // No permitir cambiar a listo si el juego ya empezó (solo a no listo)
+    if (state.currentGameState !== gameStates.WAITING && state.currentGameState !== gameStates.GAME_OVER && !player.ready) {
+      return socket.emit('readyError', { message: 'La partida ya ha comenzado.' });
+    }
+
+
+    player.ready = !player.ready;
+
+    if (player.ready) {
+      state.readyState[player.team].add(socket.id);
+      console.log(`[${currentRoomId}] Jugador ${player.name} está LISTO.`);
+    } else {
+      state.readyState[player.team].delete(socket.id);
+      console.log(`[${currentRoomId}] Jugador ${player.name} YA NO está listo.`);
+    }
+
+    // Emitir actualización de estado 'listo' a la sala
+    io.to(currentRoomId).emit('readyUpdate', getReadyPayload(state));
+
+    // Comprobar si el juego debe empezar (solo si estamos esperando)
+    if (state.currentGameState === gameStates.WAITING) {
+      checkStartGame(currentRoomId, state);
+    }
+  });
+
+  // --- Manejo de Movimiento ---
+  // Espera un objeto { x, z } normalizado o null
+  socket.on('playerMove', (moveData) => {
+    if (!currentRoomId) return; // Ignorar si no está en sala
+    const state = salaStates[currentRoomId];
+    const movementState = state.playerMovements.get(socket.id);
+    const player = state.players.get(socket.id);
+
+    // Ignorar si el jugador no existe, no tiene estado de movimiento, o el juego no está en PLAYING
+    if (!movementState || !player || state.currentGameState !== gameStates.PLAYING) return;
+
+    if (moveData && typeof moveData.x === 'number' && typeof moveData.z === 'number') {
+      // Usar y normalizar el vector recibido
+      movementState.moveDirection.copyFromFloats(moveData.x, 0, moveData.z);
+      // Normalizar solo si no es el vector cero
+      if (movementState.moveDirection.lengthSquared() > 0.001) {
+        movementState.moveDirection.normalize();
+      } else {
+        movementState.moveDirection.set(0, 0, 0); // Asegurar que sea cero si es muy pequeño
+      }
+    } else {
+      // Si moveData es null o inválido, detener movimiento
+      movementState.moveDirection.set(0, 0, 0);
+    }
+    // No emitimos nada aquí, el estado se envía en el bucle principal
+  });
+
+  // Handler 'ballControl'
+  socket.on('ballControl', ({ control }) => {
+    if (!currentRoomId) return;
+    const state = salaStates[currentRoomId];
+    const player = state.players.get(socket.id);
+    if (!player || state.currentGameState !== gameStates.PLAYING) return;
+
+    //console.log(`[${currentRoomId}] -> ballControl de ${player.name}. Control: ${control}`);
+
+    if (control === true) {
+      // Intenta tomar control
+      const distSq = state.ballPosition.subtract(player.position).lengthSquared();
+      const controlRadiusSq = BALL_CONTROL_RADIUS * BALL_CONTROL_RADIUS;
+      let alreadyControlled = false;
+      state.players.forEach(p => { if (p.isControllingBall) alreadyControlled = true; });
+
+      if (!alreadyControlled && distSq < controlRadiusSq) {
+        player.isControllingBall = true;
+        player.ballControlTime = performance.now();
+        state.ballVelocity.set(0, 0, 0); // Detener balón
+        console.log(`[${currentRoomId}] ${player.name} INICIA control de balón.`);
+      } else {
+        //console.log(`[${currentRoomId}] ${player.name} FALLA control.`);
+      }
+    } else if (control === false) {
+      // Soltar el balón (disparo)
+      if (player.isControllingBall) {
+        player.isControllingBall = false;
+        console.log(`[${currentRoomId}] ${player.name} SUELTA balón (disparo).`);
+
+        // Calcular dirección del disparo (hacia donde mira el jugador)
+        const forward = new Vector3(0, 0, 1); // Z local
+        const rotationMatrix = new Matrix();
+        player.rotation.toRotationMatrix(rotationMatrix);
+        const worldForward = Vector3.TransformNormal(forward, rotationMatrix).normalize();
+
+        // Aplicar impulso
+        state.ballVelocity = worldForward.scale(BALL_RELEASE_BOOST);
+        console.log(`[${currentRoomId}] Velocidad disparo: ${state.ballVelocity.length().toFixed(2)}`);
+
+        // Empujar pelota ligeramente para evitar recolisión inmediata
+        state.ballPosition.addInPlace(state.ballVelocity.normalize().scale(PLAYER_RADIUS + BALL_RADIUS + 0.1));
+      }
+    }
+    // El estado se emitirá en el siguiente tick de emitGameState
+  });
+
+  // Handler 'chatMessage'
+  socket.on('chatMessage', (message) => {
+    if (!currentRoomId) return;
+    const state = salaStates[currentRoomId];
+    const player = state.players.get(socket.id);
+    if (!player) return;
+
+    const sanitizedMessage = sanitizeInput(message);
+    if (!sanitizedMessage) return;
+
+    console.log(`[${currentRoomId}] Chat [${player.name}]: ${sanitizedMessage}`);
+    // Emitir a la sala correcta
+    io.to(currentRoomId).emit('chatUpdate', {
+      playerId: socket.id,
+      playerName: player.name,
+      message: sanitizedMessage,
+      timestamp: Date.now()
     });
   });
 
-  socket.on('selectTeam', ({ team }) => {
-    if (team !== 'left' && team !== 'right') {
-      socket.emit('error', { message: 'Equipo inválido' });
-      return;
-    }
+  // Handler 'disconnect'
+  socket.on('disconnect', (reason) => {
+    console.log(`-- Cliente desconectado: ${socket.id}. Sala: ${currentRoomId || 'N/A'}. Razón: ${reason}`);
+    if (!currentRoomId) return; // Si nunca se unió a una sala
 
-    if (teams[team].length >= MAX_PLAYERS_PER_TEAM) {
-      socket.emit('error', { message: 'Equipo lleno' });
-      return;
-    }
+    const state = salaStates[currentRoomId];
+    if (!state) return; // Si la sala ya no existe? (raro)
 
-    const player = players.get(socket.id);
-    if (!player) {
-      socket.emit('error', { message: 'Jugador no encontrado' });
-      return;
-    }
+    const player = state.players.get(socket.id);
 
-    if (player.team) {
-      const oldTeam = teams[player.team];
-      const index = oldTeam.findIndex(p => p.id === socket.id);
-      if (index !== -1) {
-        oldTeam.splice(index, 1);
-      }
-    }
-
-    player.team = team;
-    player.ready = false;
-    teams[team].push({ id: socket.id, name: player.name });
-
-    player.position = new Vector3(
-      team === 'left' ? -FIELD_WIDTH / 4 : FIELD_WIDTH / 4,
-      0.5,
-      (Math.random() * FIELD_HEIGHT - FIELD_HEIGHT / 2) * 0.8
-    );
-
-    io.emit('teamUpdate', teams);
-    socket.emit('teamSelected', { team });
-    io.emit('readyUpdate', getReadyStatus());
-
-    checkGameStatus();
-  });
-
-  socket.on('toggleReady', () => {
-    const player = players.get(socket.id);
-    if (player && player.team) {
-      player.ready = !player.ready;
-      console.log(`Jugador ${player.name} (${socket.id}) cambió su estado ready a:`, player.ready);
-
-      const readyStatus = getReadyStatus();
-      io.emit('readyUpdate', readyStatus);
-
-      const allPlayersReady = [...teams.left, ...teams.right]
-        .every(teamPlayer => players.get(teamPlayer.id)?.ready);
-
-      console.log('¿Todos los jugadores están listos?', allPlayersReady);
-
-      if (allPlayersReady && teams.left.length > 0 && teams.right.length > 0) {
-        currentGameState = gameStates.PLAYING;
-        io.emit('gameStart');
-        score = { left: 0, right: 0 };
-        resetBall();
-      }
-
-      io.emit('gameStateInfo', { currentState: currentGameState });
-    }
-  });
-
-  socket.on('playerMoveStart', ({ direction }) => {
-    if (!['up', 'down', 'left', 'right'].includes(direction)) {
-      socket.emit('error', { message: 'Dirección inválida' });
-      return;
-    }
-
-    const player = players.get(socket.id);
     if (player) {
-      player.movement[direction] = true;
-    }
-  });
+      console.log(`[${currentRoomId}] Limpiando jugador ${player.name} (${socket.id}) por desconexión.`);
 
-  socket.on('playerMoveStop', ({ direction }) => {
-    if (!['up', 'down', 'left', 'right'].includes(direction)) {
-      socket.emit('error', { message: 'Dirección inválida' });
-      return;
-    }
-
-    const player = players.get(socket.id);
-    if (player) {
-      player.movement[direction] = false;
-    }
-  });
-
-  socket.on('chatMessage', (message) => {
-    const player = players.get(socket.id);
-    if (player && typeof message === 'string') {
-      const sanitizedMessage = sanitizeMessage(message.trim());
-      if (sanitizedMessage.length > 0 && sanitizedMessage.length <= 200) {
-        io.emit('chatUpdate', {
-          playerId: socket.id,
-          playerName: player.name,
-          message: sanitizedMessage,
-          timestamp: new Date().toISOString()
-        });
+      // Quitar de equipos y estado 'listo'
+      if (player.team) {
+        state.teams[player.team].delete(socket.id);
+        state.readyState[player.team].delete(socket.id);
       }
+      // Quitar del mapa principal de jugadores y movimientos
+      state.players.delete(socket.id);
+      state.playerMovements.delete(socket.id);
+
+      // Notificar a los demás en la sala
+      const status = getTeamStatus(state);
+      io.to(currentRoomId).emit('teamUpdate', status.teams);
+      io.to(currentRoomId).emit('readyUpdate', getReadyPayload(state));
+      io.to(currentRoomId).emit('playerLeft', { id: socket.id, name: player.name });
+      io.to(currentRoomId).emit('playersListUpdate', Array.from(state.players.values()).map(p => ({
+        id: p.id, name: p.name, team: p.team, characterType: p.characterType
+      })));
+
+
+      // Comprobar si el juego debe terminar
+      checkGameEndOnDisconnect(currentRoomId, state);
+
+    } else {
+      console.log(`[${currentRoomId}] Advertencia: Jugador ${socket.id} desconectado no encontrado en estado.`);
     }
-  });
 
-  socket.on('ballControl', ({ control, shooting }) => {
-    const player = players.get(socket.id);
-    if (player) {
-      const distanceToPlayer = Vector3.Distance(player.position, ballPosition);
-      const KICK_RADIUS = PLAYER_RADIUS + BALL_RADIUS + 0.3;
+    // Importante: No limpiar currentRoomId aquí, se limpia para el próximo ciclo de conexión
+    // currentRoomId = null; // No hacer esto aquí
 
-      console.log(`Jugador ${player.name} ${control ? 'inició' : 'soltó'} el control del balón`);
-      player.isControllingBall = control;
+  }); // Fin de socket.on('disconnect')
 
-      if (control) {
-        player.ballControlTime = Date.now();
-      } else if (shooting) {
-        // Aplicar boost SOLO al soltar Y si está dentro del radio de pateo
-        const controlDuration = (Date.now() - player.ballControlTime) / 1000;
-        if (controlDuration < 3 && distanceToPlayer <= KICK_RADIUS) {
-          const playerToBall = ballPosition.subtract(player.position);
-          // Aumentar el boost para un disparo más potente
-          ballVelocity = playerToBall.normalize().scale(BALL_RELEASE_BOOST * 0.8);
-          console.log('Aplicando disparo - Distancia:', distanceToPlayer);
+}); // Fin de io.on('connection')
+
+
+// --- Bucle Principal del Juego ---
+function mainLoop() {
+  availableSalas.forEach(roomId => {
+    const state = salaStates[roomId];
+    if (!state) return; // Seguridad
+
+    // Actualizar física solo si se está jugando
+    if (state.currentGameState === gameStates.PLAYING) {
+      updateGamePhysics(roomId, state);
+    }
+
+    // Emitir estado siempre que haya jugadores (o según necesidad)
+    if (state.players.size > 0) {
+      emitGameState(roomId, state);
+    } else {
+      // Si no hay jugadores, asegurarse de que el bucle de física esté detenido
+      if (state.gameLoopInterval) {
+        clearInterval(state.gameLoopInterval);
+        state.gameLoopInterval = null;
+        console.log(`[${roomId}] Bucle detenido por no haber jugadores.`);
+        // Considerar resetear la sala a WAITING si no lo está ya
+        if (state.currentGameState !== gameStates.WAITING) {
+          resetFullRoomState(roomId, state);
         }
       }
     }
   });
+}
+
+// Iniciar el bucle principal
+setInterval(mainLoop, 1000 / PHYSICS_TICK_RATE);
 
 
-  socket.on('disconnect', () => {
-    const player = players.get(socket.id);
-    if (player && player.team) {
-      const teamArray = teams[player.team];
-      const index = teamArray.findIndex(p => p.id === socket.id);
-      if (index !== -1) {
-        teamArray.splice(index, 1);
-        io.emit('teamUpdate', teams);
-        io.emit('readyUpdate', getReadyStatus());
-      }
-    }
-    players.delete(socket.id);
-    io.emit('playersListUpdate', Array.from(players.values()).map(player => ({
-      id: player.id,
-      name: player.name,
-      team: player.team,
-      characterType: player.characterType
-    })));
+// --- Función Auxiliar para Fin de Juego por Desconexión ---
+function checkGameEndOnDisconnect(roomId, state) {
+  // Solo actuar si el juego estaba en progreso
+  if (state.currentGameState !== gameStates.PLAYING) return;
 
-    checkGameStatus();
-  });
-});
+  const leftCount = state.teams.left.size;
+  const rightCount = state.teams.right.size;
 
+  // No terminar si aún queda al menos un jugador por equipo
+  if (leftCount > 0 && rightCount > 0) return;
+
+  console.log(`[${roomId}] Comprobando fin de juego por desconexión. Left: ${leftCount}, Right: ${rightCount}`);
+
+  if (leftCount === 0 && rightCount > 0) {
+    // Gana equipo derecho por abandono
+    stopGame(roomId, state, getWinningMessage('right') + " (Equipo rival abandonó)", { left: state.score.left, right: GOALS_TO_WIN }, 'right');
+  } else if (rightCount === 0 && leftCount > 0) {
+    // Gana equipo izquierdo por abandono
+    stopGame(roomId, state, getWinningMessage('left') + " (Equipo rival abandonó)", { left: GOALS_TO_WIN, right: state.score.right }, 'left');
+  } else if (leftCount === 0 && rightCount === 0) {
+    // No quedan jugadores
+    stopGame(roomId, state, "Todos los jugadores abandonaron la partida.", state.score, null);
+    // Podríamos resetear inmediatamente aquí si quisiéramos
+    // resetFullRoomState(roomId, state);
+  }
+}
+
+
+// --- Inicio del Servidor HTTP ---
 const PORT = process.env.PORT || 4000;
-httpServer.listen(PORT, () => {
-  console.log(`Servidor de juego corriendo en el puerto ${PORT}`);
+httpServer.listen(PORT, '0.0.0.0', () => { // Escuchar en todas las interfaces
+  console.log(`Servidor de juego corriendo en el puerto ${PORT} y escuchando en 0.0.0.0`);
 });

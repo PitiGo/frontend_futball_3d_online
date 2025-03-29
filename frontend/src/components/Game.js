@@ -13,10 +13,24 @@ import TeamSelectionScreen from './TeamSelectionScreen'
 import MobileJoystick from './MobileJoystick';  // <-- Añadir esta línea
 import LanguageSelector from '../i18n/LanguageSelector';
 import { useTranslation } from '../i18n/LanguageContext';
+import { useSearchParams, useNavigate } from 'react-router-dom';
 
 
-const Game = ({ roomId }) => {
+const Game = () => {
+    const [searchParams, setSearchParams] = useSearchParams();
+    const navigate = useNavigate();
 
+    // Get roomId from query parameter and validate
+    const roomParam = searchParams.get('room');
+    const roomId = roomParam ? `room${roomParam}` : null;
+
+    // Debug logging
+    console.group('Game Component URL Parameters');
+    console.log('URL actual:', window.location.href);
+    console.log('Search params:', Object.fromEntries(searchParams));
+    console.log('Room parameter:', roomParam);
+    console.log('Computed roomId:', roomId);
+    console.groupEnd();
 
     const { t } = useTranslation();
     const canvasRef = useRef(null);
@@ -715,7 +729,7 @@ const Game = ({ roomId }) => {
     }, [sceneReady]);
 
     const handleJoinGame = (name) => {
-        socketRef.current.emit('joinGame', { name });
+        socketRef.current.emit('joinGame', { name: name.trim(), roomId: roomId });
         setPlayerName(name);
         setHasJoined(true);
     };
@@ -733,127 +747,203 @@ const Game = ({ roomId }) => {
         setChatVisible(!chatVisible);
     };
 
-
-
+    // Validate room and redirect if invalid
     useEffect(() => {
-        console.log('Componente Game montado para sala:', roomId);
+        console.group('Room Validation');
+        console.log('Validando sala:', roomId);
+
+        const isValidRoom = roomId === 'room1' || roomId === 'room2';
+
+        if (!isValidRoom) {
+            console.warn('Sala no válida, redirigiendo a room1');
+            setSearchParams({ room: '1' });
+        }
+
+        console.log('Sala válida:', isValidRoom);
+        console.groupEnd();
+    }, [roomId, setSearchParams]);
+
+    // Modified socket setup
+    const setupSocket = useCallback(() => {
+        console.group('Socket Setup (Nginx Path)');
+        if (!roomId) {
+            console.error('Error: roomId no está definido al intentar configurar el socket');
+            console.groupEnd();
+            return null;
+        }
+
+        const publicGameUrl = process.env.REACT_APP_GAME_SERVER_URL || 'https://football-online-3d.dantecollazzi.com';
+        console.log('Configurando socket con (Nginx Path):', {
+            publicGameUrl,
+            roomId
+
+        });
+
+        try {
+            const socket = io(/* publicGameUrl, */ {
+
+                transports: ['websocket'],
+                // secure: publicGameUrl.startsWith('https'),
+                reconnection: true,
+                reconnectionAttempts: 5,
+                reconnectionDelay: 1000,
+            });
+
+            // 5. OPCIONAL: Actualiza este log
+            console.log('Socket Options Effective (Default Path):', JSON.stringify(socket.io.opts, null, 2)); // <-- CAMBIO SUGERIDO
+
+            socket.on('connect', () => {
+                console.log('Socket conectado exitosamente (Nginx Path):', {
+                    id: socket.id,
+                    opts: socket.io.opts,
+                    roomId
+                });
+                setIsConnected(true);
+            });
+
+            socket.on('connect_error', (error) => {
+                console.error('Error de conexión del socket (Nginx Path):', {
+                    error: error.message || error,
+                    roomId,
+                    urlAttempted: publicGameUrl,
+                    pathAttempted: '/socket.io/'
+                });
+                if (error.description) console.error('Descripción del error:', error.description);
+                if (error.context) console.error('Contexto del error:', error.context);
+                setIsConnected(false);
+            });
+
+            console.groupEnd();
+            return socket;
+        } catch (error) {
+            console.error('Error al crear el socket:', error);
+            console.log('Error details:', error); // Añade más detalles del error si lo hay
+            console.groupEnd();
+            return null;
+        }
+    }, [roomId]);
+
+    // First, ensure these handlers are defined outside the useEffect
+    const handleTeamSelect = useCallback((team) => {
+        console.log('Intentando seleccionar equipo:', {
+            team,
+            socketExists: !!socketRef.current,
+            socketConnected: socketRef.current?.connected
+        });
+        if (!socketRef.current?.connected) {
+            console.error('Socket no conectado');
+            return;
+        }
+        socketRef.current.emit('selectTeam', { team });
+        console.log('Evento selectTeam emitido');
+    }, []); // Empty dependencies as it only uses stable ref
+
+    // Main useEffect for socket connection and listeners
+    useEffect(() => {
+        console.group('Game Initialization Effect (Socket Focus)');
+        console.log('Ejecutando useEffect principal. RoomId:', roomId);
+
+        if (!roomId) {
+            console.warn('roomId no definido...');
+            console.groupEnd();
+            return;
+        }
 
         const canvas = canvasRef.current;
-        if (!canvas) return;
-
-        const scene = createScene(canvas);
-
-        // Configurar el motor de renderizado
-        if (engineRef.current) {
-            engineRef.current.runRenderLoop(() => {
-                if (scene) {
-                    scene.render();
-                }
-            });
+        if (!canvas) {
+            console.error('Canvas no encontrado.');
+            console.groupEnd();
+            return;
         }
 
-        // Configuración del WebSocket basada en el entorno
-        const isDev = process.env.NODE_ENV === 'development';
-        const baseUrl = isDev ? 'http://localhost' : process.env.REACT_APP_BASE_URL;
-
-        // Configurar socket con el roomId específico
-        if (isDev) {
-            const url = `${baseUrl}:${roomId === 'sala1' ? '4000' : '4001'}`;
-            console.log('Conectando a servidor de desarrollo:', url);
-            socketRef.current = io(url, {
-                transports: ['websocket'],
-                query: { roomId }
-            });
-        } else {
-            console.log('Conectando a servidor de producción:', baseUrl);
-            socketRef.current = io(baseUrl, {
-                transports: ['websocket'],
-                path: `/${roomId}/socket.io`,
-                secure: true,
-                query: { roomId }
-            });
+        let engine = engineRef.current;
+        if (!engine) {
+            console.log("Inicializando Babylon Engine...");
+            createScene(canvas);
+            engine = engineRef.current;
         }
 
-        // Manejadores de eventos del socket
-        socketRef.current.on('connect', () => {
-            console.log(`Conectado al servidor de la sala ${roomId} con ID:`, socketRef.current.id);
+        let socket = socketRef.current;
+        if (!socket || (!socket.connected && !socket.connecting)) {
+            console.log("Socket no existe o está desconectado, creando/reconectando...");
+            if (socket) socket.disconnect();
+            socket = setupSocket();
+            socketRef.current = socket;
+        }
+
+        if (!socket) {
+            console.error("Fallo al crear/obtener el socket.");
+            console.groupEnd();
+            return;
+        }
+
+        console.log(`Socket ${socket.id} listo, adjuntando/verificando listeners...`);
+
+        // Event handlers
+        const handleConnect = () => {
+            console.log('>>> Socket conectado:', socket.id);
             setIsConnected(true);
-        });
-
-        socketRef.current.on('disconnect', () => {
-            console.log(`Desconectado de la sala ${roomId}`);
-            setIsConnected(false);
-        });
-
-        socketRef.current.on('connect_error', (error) => {
-            console.error(`Error de conexión en sala ${roomId}:`, error);
-            setIsConnected(false);
-        });
-
-        // Manejador de redimensionamiento
-        const handleResize = () => {
-            if (engineRef.current) {
-                engineRef.current.resize();
+            if (hasJoined && playerName) {
+                console.log("Emitiendo joinGame al (re)conectar.");
+                socket.emit('joinGame', { name: playerName });
             }
         };
 
-        window.addEventListener('resize', handleResize);
+        const handleConnectError = (error) => {
+            console.error('>>> Error de conexión:', error);
+            setIsConnected(false);
+        };
 
-        // Función de limpieza mejorada
-        return () => {
-            console.log(`Limpiando recursos de la sala ${roomId}`);
+        const handleTeamSelected = ({ team }) => {
+            console.log('>>> Evento teamSelected recibido:', team);
+            setCurrentTeam(team);
+            setTeamSelected(true);
+        };
 
-            // Limpiar socket
-            if (socketRef.current) {
-                console.log(`Desconectando socket de la sala ${roomId}`);
-                socketRef.current.removeAllListeners();
-                socketRef.current.disconnect();
-                socketRef.current = null;
-            }
+        const handleTeamUpdate = (updatedTeams) => {
+            console.log('>>> Evento teamUpdate recibido:', updatedTeams);
+            setTeams(updatedTeams);
+        };
 
-            // Limpiar recursos de Babylon.js
-            if (characterManagerRef.current) {
-                characterManagerRef.current.dispose();
-                characterManagerRef.current = null;
-            }
+        const handleReadyUpdate = (updatedReadyState) => {
+            console.log('>>> Evento readyUpdate recibido:', updatedReadyState);
+            setReadyState(updatedReadyState);
+        };
 
-            if (sceneRef.current) {
-                sceneRef.current.dispose();
-                sceneRef.current = null;
-            }
+        // Register listeners
+        socket.on('connect', handleConnect);
+        socket.on('connect_error', handleConnectError);
+        socket.on('teamSelected', handleTeamSelected);
+        socket.on('teamUpdate', handleTeamUpdate);
+        socket.on('readyUpdate', handleReadyUpdate);
+        socket.on('gameStateUpdate', updateGameState);
 
-            if (engineRef.current) {
-                engineRef.current.stopRenderLoop();
-                engineRef.current.dispose();
-                engineRef.current = null;
-            }
-
-            // Limpiar efectos visuales
-            if (controlEffectsRef.current) {
-                const { particles, controlRing, ballHalo } = controlEffectsRef.current;
-
-                if (Array.isArray(particles)) {
-                    particles.forEach(particle => {
-                        if (particle && particle.dispose) {
-                            particle.dispose();
-                        }
-                    });
+        if (engine && !engine.isPointerLock) {
+            console.log("Iniciando Render Loop...");
+            engine.runRenderLoop(() => {
+                if (sceneRef.current) {
+                    sceneRef.current.render();
                 }
+            });
+        }
 
-                if (controlRing?.dispose) controlRing.dispose();
-                if (ballHalo?.dispose) ballHalo.dispose();
+        console.groupEnd();
 
-                controlEffectsRef.current = null;
+        return () => {
+            console.group('Cleanup Effect');
+            console.log('Limpiando efecto principal para sala:', roomId);
+            if (socket) {
+                console.log(`Quitando listeners del socket ${socket.id}`);
+                socket.off('connect', handleConnect);
+                socket.off('connect_error', handleConnectError);
+                socket.off('teamSelected', handleTeamSelected);
+                socket.off('teamUpdate', handleTeamUpdate);
+                socket.off('readyUpdate', handleReadyUpdate);
+                socket.off('gameStateUpdate', updateGameState);
             }
-
-            // Limpiar event listeners
-            window.removeEventListener('resize', handleResize);
-            window.removeEventListener('keydown', handleKeyDown);
-            window.removeEventListener('keyup', handleKeyUp);
-            window.removeEventListener('blur', handleBlur);
-            window.removeEventListener('orientationchange', handleOrientationChange);
+            console.groupEnd();
         };
-    }, [createScene, updateGameState, roomId]); // Añadir roomId como dependencia
+    }, [roomId, createScene, setupSocket, updateGameState, hasJoined, playerName]);
 
     useEffect(() => {
         const checkMobile = () => {
@@ -917,6 +1007,37 @@ const Game = ({ roomId }) => {
         setCurrentDirection(direction);
     }, [currentDirection]);
 
+    // Monitor state changes
+    useEffect(() => {
+        console.log('Estado del juego actualizado:', {
+            roomId,
+            isConnected,
+            hasSocket: !!socketRef.current,
+            currentTeam,
+            teamSelected,
+            gameStarted
+        });
+    }, [roomId, isConnected, currentTeam, teamSelected, gameStarted]);
+
+    // Show loading or error state if no valid room
+    if (!roomId) {
+        return (
+            <div style={{
+                position: 'fixed',
+                top: '50%',
+                left: '50%',
+                transform: 'translate(-50%, -50%)',
+                textAlign: 'center',
+                color: 'white',
+                backgroundColor: 'rgba(0, 0, 0, 0.8)',
+                padding: '20px',
+                borderRadius: '8px'
+            }}>
+                <h2>Error</h2>
+                <p>Redirigiendo a una sala válida...</p>
+            </div>
+        );
+    }
 
     return (
         <div style={{
@@ -945,15 +1066,23 @@ const Game = ({ roomId }) => {
 
             {!isLoading && hasJoined && !gameStarted && !showingEndMessage && (
                 <div style={{ maxHeight: '100%', overflow: 'auto' }}>
+                    {console.log('Renderizando TeamSelectionScreen:', {
+                        currentTeam,
+                        teamSelected,
+                        socketConnected: socketRef.current?.connected
+                    })}
                     <TeamSelectionScreen
-                        onTeamSelect={(team) => {
-                            console.log('Seleccionando equipo:', team);
-                            socketRef.current.emit('selectTeam', { team });
-                        }}
+                        debug={true}
+                        onTeamSelect={handleTeamSelect}
                         onCharacterSelect={(characterType) => {
-                            console.log('Seleccionando personaje:', characterType);
-                            setSelectedCharacter(characterType);
-                            socketRef.current.emit('selectCharacter', { characterType });
+                            console.log('Intentando seleccionar personaje:', characterType);
+                            if (socketRef.current?.connected) {
+                                setSelectedCharacter(characterType);
+                                socketRef.current.emit('selectCharacter', { characterType });
+                                console.log('Evento selectCharacter emitido al servidor');
+                            } else {
+                                console.error('Socket no disponible o desconectado');
+                            }
                         }}
                         teams={teams}
                         readyState={readyState}
