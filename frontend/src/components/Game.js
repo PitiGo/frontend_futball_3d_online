@@ -910,6 +910,73 @@ const Game = () => {
             setReadyState(updatedReadyState);
         };
 
+        // Nuevos manejadores de eventos
+        const handleGameStart = () => {
+            console.log('>>> Juego iniciado');
+            setGameStarted(true);
+            setGameInProgress(true);
+        };
+
+        const handleGoalScored = ({ team, score }) => {
+            console.log(`>>> Gol anotado por equipo ${team}`);
+            setScore(score);
+            // Mostrar animación o notificación de gol
+        };
+
+        const handleGameOver = (gameOverData) => {
+            console.log('>>> Juego terminado:', gameOverData);
+            setGameStarted(false);
+            setGameInProgress(false);
+            setShowingEndMessage(true);
+            // Mostrar mensaje de fin de juego basado en gameOverData
+        };
+
+        const handleScoreUpdate = (newScore) => {
+            console.log('>>> Actualización de puntaje:', newScore);
+            setScore(newScore);
+        };
+
+        const handleGameStateInfo = ({ currentState }) => {
+            console.log('>>> Estado del juego:', currentState);
+            setGameInProgress(currentState === 'playing');
+        };
+
+        const handleChatUpdate = (message) => {
+            console.log('>>> Nuevo mensaje de chat:', message);
+            setChatMessages(prev => [...prev, message]);
+        };
+
+        const handlePlayerLeft = ({ id, name }) => {
+            console.log(`>>> Jugador ${name} (${id}) ha dejado el juego`);
+            // Actualizar UI si es necesario
+        };
+
+        const handlePlayersListUpdate = (playersList) => {
+            console.log('>>> Lista de jugadores actualizada:', playersList);
+            setConnectedPlayers(playersList);
+        };
+
+        // Manejadores de errores
+        const handleJoinError = ({ message }) => {
+            console.error('>>> Error al unirse:', message);
+            alert(message);
+        };
+
+        const handleSelectTeamError = ({ message }) => {
+            console.error('>>> Error al seleccionar equipo:', message);
+            alert(message);
+        };
+
+        const handleSelectCharacterError = ({ message }) => {
+            console.error('>>> Error al seleccionar personaje:', message);
+            alert(message);
+        };
+
+        const handleReadyError = ({ message }) => {
+            console.error('>>> Error al marcar como listo:', message);
+            alert(message);
+        };
+
         // Register listeners
         socket.on('connect', handleConnect);
         socket.on('connect_error', handleConnectError);
@@ -917,6 +984,20 @@ const Game = () => {
         socket.on('teamUpdate', handleTeamUpdate);
         socket.on('readyUpdate', handleReadyUpdate);
         socket.on('gameStateUpdate', updateGameState);
+
+        // Registrar nuevos listeners
+        socket.on('gameStart', handleGameStart);
+        socket.on('goalScored', handleGoalScored);
+        socket.on('gameOver', handleGameOver);
+        socket.on('scoreUpdate', handleScoreUpdate);
+        socket.on('gameStateInfo', handleGameStateInfo);
+        socket.on('chatUpdate', handleChatUpdate);
+        socket.on('playerLeft', handlePlayerLeft);
+        socket.on('playersListUpdate', handlePlayersListUpdate);
+        socket.on('joinError', handleJoinError);
+        socket.on('selectTeamError', handleSelectTeamError);
+        socket.on('selectCharacterError', handleSelectCharacterError);
+        socket.on('readyError', handleReadyError);
 
         if (engine && !engine.isPointerLock) {
             console.log("Iniciando Render Loop...");
@@ -940,6 +1021,20 @@ const Game = () => {
                 socket.off('teamUpdate', handleTeamUpdate);
                 socket.off('readyUpdate', handleReadyUpdate);
                 socket.off('gameStateUpdate', updateGameState);
+
+                // Limpiar nuevos listeners
+                socket.off('gameStart', handleGameStart);
+                socket.off('goalScored', handleGoalScored);
+                socket.off('gameOver', handleGameOver);
+                socket.off('scoreUpdate', handleScoreUpdate);
+                socket.off('gameStateInfo', handleGameStateInfo);
+                socket.off('chatUpdate', handleChatUpdate);
+                socket.off('playerLeft', handlePlayerLeft);
+                socket.off('playersListUpdate', handlePlayersListUpdate);
+                socket.off('joinError', handleJoinError);
+                socket.off('selectTeamError', handleSelectTeamError);
+                socket.off('selectCharacterError', handleSelectCharacterError);
+                socket.off('readyError', handleReadyError);
             }
             console.groupEnd();
         };
@@ -1006,6 +1101,94 @@ const Game = () => {
 
         setCurrentDirection(direction);
     }, [currentDirection]);
+
+    // Manejadores de eventos de teclado para movimiento
+    const handleKeyDown = useCallback((e) => {
+        if (chatInputFocusRef.current) return; // No procesar teclas si el chat está enfocado
+
+        if (!socketRef.current || !isConnected || !gameStarted) return;
+
+        let direction = null;
+
+        switch (e.key.toLowerCase()) {
+            case 'w':
+            case 'arrowup':
+                direction = 'up';
+                break;
+            case 's':
+            case 'arrowdown':
+                direction = 'down';
+                break;
+            case 'a':
+            case 'arrowleft':
+                direction = 'left';
+                break;
+            case 'd':
+            case 'arrowright':
+                direction = 'right';
+                break;
+            case ' ':
+                // Controlar balón (espacio)
+                socketRef.current.emit('ballControl', { control: true });
+                return;
+            default:
+                return;
+        }
+
+        if (direction) {
+            socketRef.current.emit('playerMoveStart', { direction });
+            setCurrentDirection(direction);
+        }
+    }, [isConnected, gameStarted]);
+
+    const handleKeyUp = useCallback((e) => {
+        if (chatInputFocusRef.current) return;
+
+        if (!socketRef.current || !isConnected) return;
+
+        let direction = null;
+
+        switch (e.key.toLowerCase()) {
+            case 'w':
+            case 'arrowup':
+                direction = 'up';
+                break;
+            case 's':
+            case 'arrowdown':
+                direction = 'down';
+                break;
+            case 'a':
+            case 'arrowleft':
+                direction = 'left';
+                break;
+            case 'd':
+            case 'arrowright':
+                direction = 'right';
+                break;
+            case ' ':
+                // Soltar balón (espacio)
+                socketRef.current.emit('ballControl', { control: false });
+                return;
+            default:
+                return;
+        }
+
+        if (direction && direction === currentDirection) {
+            socketRef.current.emit('playerMoveStop', { direction });
+            setCurrentDirection(null);
+        }
+    }, [isConnected, currentDirection]);
+
+    // Añadir useEffect para los event listeners de teclado
+    useEffect(() => {
+        window.addEventListener('keydown', handleKeyDown);
+        window.addEventListener('keyup', handleKeyUp);
+
+        return () => {
+            window.removeEventListener('keydown', handleKeyDown);
+            window.removeEventListener('keyup', handleKeyUp);
+        };
+    }, [handleKeyDown, handleKeyUp]);
 
     // Monitor state changes
     useEffect(() => {
