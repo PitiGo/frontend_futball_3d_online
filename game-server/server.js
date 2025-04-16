@@ -209,6 +209,16 @@ function getReadyPayload(state) {
   }
 }
 
+// Returns a winning message based on the team that won
+function getWinningMessage(winningTeam) {
+  if (winningTeam === 'left') {
+    return "The Mammals team (Blue) has won!";
+  } else if (winningTeam === 'right') {
+    return "The Reptiles team (Red) has won!";
+  } else {
+    return "Game Over!"; // Default message
+  }
+}
 
 // --- Lógica de Inicio/Fin de Juego ---
 
@@ -280,8 +290,9 @@ function stopGame(roomId, state, reason, finalScore, winningTeam) {
   io.to(roomId).emit('gameOver', state.gameOverData);
   console.log(`[${roomId}] Juego terminado: ${reason}`);
 
-  // Opcional: Programar un reinicio completo de la sala después de un tiempo
-  // setTimeout(() => resetFullRoomState(roomId, state), 15000); // 15 segundos
+  // Programa el reinicio de la sala después de un tiempo (ej: 10-15 segundos)
+  console.log(`[${roomId}] Programando reinicio de sala en 15 segundos...`);
+  setTimeout(() => resetFullRoomState(roomId, state), 15000); // 15 segundos
 }
 
 // Reinicia la sala al estado WAITING, manteniendo jugadores y equipos
