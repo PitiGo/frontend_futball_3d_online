@@ -8,21 +8,40 @@ import cors from 'cors';
 import { performance } from 'perf_hooks'; // Para performance.now() en Node.js
 
 const app = express();
-app.use(cors()); // Considera ser más específico si es necesario
+
+// Configuración específica de CORS para Express
+const allowedOrigins = [
+  "https://football-online-3d.dantecollazzi.com",
+  "https://www.dantecollazzi.com",
+  "http://localhost:3000"
+];
+
+app.use(cors({
+  origin: function (origin, callback) {
+    // Permitir solicitudes sin origin (como las de Postman o curl)
+    if (!origin) return callback(null, true);
+
+    if (allowedOrigins.indexOf(origin) === -1) {
+      const msg = 'The CORS policy for this site does not allow access from the specified Origin.';
+      return callback(new Error(msg), false);
+    }
+    return callback(null, true);
+  },
+  methods: ['GET', 'POST', 'OPTIONS'],
+  credentials: true,
+  maxAge: 86400 // Cache preflight requests for 24 hours
+}));
 
 const httpServer = createServer(app);
 
 // Configuración de Socket.IO
 const io = new Server(httpServer, {
   cors: {
-    origin: [ // Lista de orígenes permitidos
-      "https://football-online-3d.dantecollazzi.com",
-      "http://localhost:3000"       // Para desarrollo local del frontend
-    ],
+    origin: allowedOrigins,
     methods: ["GET", "POST"],
-    credentials: true // Ajustar si es necesario
+    credentials: true,
+    allowedHeaders: ["Content-Type", "Authorization"]
   }
-  // proxy: true // Probablemente no necesario con la config Nginx correcta
 });
 
 // --- Constantes del Juego ---
@@ -107,7 +126,7 @@ app.get('/:roomId/status', (req, res) => {
     gameInProgress: state.currentGameState === gameStates.PLAYING,
     score: state.score,
     teams: status.teams,
-    readyState: status.readyState // Enviar nombres de jugadores listos
+    readyState: getReadyPayload(state) // Corregido: usar getReadyPayload en lugar de status.readyState
   });
 });
 
