@@ -158,13 +158,27 @@ class CharacterManager {
             // Ajustar posición vertical si es necesario
             playerInstance.position.y = 0; // Asegurarse de que está en el suelo
 
-            // Clonar animaciones
+            // Clonar y re-dirigir animaciones para la nueva instancia
             const playerAnimations = {};
             Object.entries(characterData.animationGroups).forEach(([name, group]) => {
-                const clonedGroup = group.clone();
-                clonedGroup.stop();
+                // Clona el grupo de animación con un nuevo nombre y un "target converter".
+                // Esto asegura que la animación se aplique a la nueva malla clonada y no a la original.
+                const clonedGroup = group.clone(
+                    `anim-group-${playerId}-${name}`, // Se le da un nombre único al clon para depuración.
+                    (originalTarget) => {
+                        // El 'targetConverter' encuentra el nodo correspondiente en la nueva instancia del jugador.
+                        // Si el objetivo original era el mesh raíz, ahora será la nueva instancia raíz.
+                        if (originalTarget === characterData.mesh) {
+                            return playerInstance;
+                        }
+                        // Para los huesos, busca un descendiente en la nueva instancia con el mismo nombre.
+                        return playerInstance.getDescendants(false).find(d => d.name === originalTarget.name);
+                    }
+                );
+
+                clonedGroup.stop(); // Detener la animación clonada por defecto.
                 playerAnimations[name] = clonedGroup;
-                console.log(`Clonada animación ${name} para jugador ${playerId}`);
+                console.log(`Clonada y re-dirigida la animación ${name} para el jugador ${playerId}`);
             });
 
             this.playerInstances.set(playerId, {

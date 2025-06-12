@@ -983,39 +983,6 @@ io.on('connection', (socket) => {
 }); // Fin de io.on('connection')
 
 
-// --- Bucle Principal del Juego ---
-function mainLoop() {
-  availableSalas.forEach(roomId => {
-    const state = salaStates[roomId];
-    if (!state) return; // Seguridad
-
-    // Actualizar física solo si se está jugando
-    if (state.currentGameState === gameStates.PLAYING) {
-      updateGamePhysics(roomId, state);
-    }
-
-    // Emitir estado siempre que haya jugadores (o según necesidad)
-    if (state.players.size > 0) {
-      emitGameState(roomId, state);
-    } else {
-      // Si no hay jugadores, asegurarse de que el bucle de física esté detenido
-      if (state.gameLoopInterval) {
-        clearInterval(state.gameLoopInterval);
-        state.gameLoopInterval = null;
-        console.log(`[${roomId}] Bucle detenido por no haber jugadores.`);
-        // Considerar resetear la sala a WAITING si no lo está ya
-        if (state.currentGameState !== gameStates.WAITING) {
-          resetFullRoomState(roomId, state);
-        }
-      }
-    }
-  });
-}
-
-// Iniciar el bucle principal
-setInterval(mainLoop, 1000 / PHYSICS_TICK_RATE);
-
-
 // --- Función Auxiliar para Fin de Juego por Desconexión ---
 function checkGameEndOnDisconnect(roomId, state) {
   // Solo actuar si el juego estaba en progreso
