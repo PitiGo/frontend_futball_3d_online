@@ -155,31 +155,47 @@ class CharacterManager {
                 0        // No rotación en Z
             );
 
-            // Ajustar posición vertical si es necesario
-            playerInstance.position.y = 0; // Asegurarse de que está en el suelo
+            // Ajustar posición vertical para corregir el hundimiento
+            playerInstance.position.y = 1.0; // Ajusta este valor si es necesario
 
-            // Clonar y re-dirigir animaciones para la nueva instancia
+            // --- CÓDIGO MEJORADO para clonar animaciones ---
             const playerAnimations = {};
-            Object.entries(characterData.animationGroups).forEach(([name, group]) => {
-                // Clona el grupo de animación con un nuevo nombre y un "target converter".
-                // Esto asegura que la animación se aplique a la nueva malla clonada y no a la original.
-                const clonedGroup = group.clone(
-                    `anim-group-${playerId}-${name}`, // Se le da un nombre único al clon para depuración.
-                    (originalTarget) => {
-                        // El 'targetConverter' encuentra el nodo correspondiente en la nueva instancia del jugador.
-                        // Si el objetivo original era el mesh raíz, ahora será la nueva instancia raíz.
-                        if (originalTarget === characterData.mesh) {
-                            return playerInstance;
-                        }
-                        // Para los huesos, busca un descendiente en la nueva instancia con el mismo nombre.
-                        return playerInstance.getDescendants(false).find(d => d.name === originalTarget.name);
+            if (characterData.animationGroups) {
+                Object.entries(characterData.animationGroups).forEach(([name, group]) => {
+                    if (!group) {
+                        console.warn(`El grupo de animación '${name}' está nulo o indefinido para el personaje.`);
+                        return; // Saltar este grupo de animación
                     }
-                );
 
-                clonedGroup.stop(); // Detener la animación clonada por defecto.
-                playerAnimations[name] = clonedGroup;
-                console.log(`Clonada y re-dirigida la animación ${name} para el jugador ${playerId}`);
-            });
+                    // Re-apunta las animaciones a la nueva malla y su esqueleto
+                    const clonedGroup = group.clone(`anim-group-${playerId}-${name}`);
+
+                    // La propiedad `targetedAnimations` contiene las animaciones individuales y sus objetivos.
+                    // Tenemos que re-dirigir cada una de ellas.
+                    clonedGroup.targetedAnimations.forEach(targetedAnim => {
+                        const originalTarget = targetedAnim.target;
+
+                        // Si el objetivo original es la malla raíz, el nuevo objetivo es la instancia clonada.
+                        if (originalTarget === characterData.mesh) {
+                            targetedAnim.target = playerInstance;
+                        }
+                        // Si no, es probable que sea un hueso o un nodo hijo.
+                        // Buscamos un descendiente en la nueva instancia con el mismo nombre.
+                        else {
+                            const newTarget = playerInstance.getDescendants(false).find(d => d.name === originalTarget.name);
+                            if (newTarget) {
+                                targetedAnim.target = newTarget;
+                            } else {
+                                console.warn(`No se pudo encontrar el nuevo target para la animación '${targetedAnim.animation.name}' en el target original '${originalTarget.name}'`);
+                            }
+                        }
+                    });
+
+                    clonedGroup.stop(); // Detener la animación clonada por defecto.
+                    playerAnimations[name] = clonedGroup;
+                    console.log(`Clonada y re-dirigida la animación ${name} para el jugador ${playerId}`);
+                });
+            }
 
             this.playerInstances.set(playerId, {
                 root: playerRoot,
