@@ -17,7 +17,8 @@
     "cors": "^2.8.5",
     "express": "^4.21.1",
     "sanitize-html": "^2.13.1",
-    "socket.io": "^4.8.0"
+    "socket.io": "^4.8.0",
+    "prom-client": "^15.1.0"
   },
   "devDependencies": {
     "eslint": "^9.12.0",

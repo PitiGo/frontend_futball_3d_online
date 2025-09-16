@@ -6,6 +6,7 @@ import { Server } from 'socket.io';
 import { Vector3, Quaternion, Matrix } from '@babylonjs/core'; // Añadir Matrix
 import cors from 'cors';
 import { performance } from 'perf_hooks'; // Para performance.now() en Node.js
+import * as promClient from 'prom-client';
 
 const app = express();
 
@@ -33,6 +34,23 @@ app.use(cors({
 }));
 
 const httpServer = createServer(app);
+// --- Métricas Prometheus básicas ---
+promClient.collectDefaultMetrics({ prefix: 'football3d_' });
+const metrics = {
+  connectedClients: new promClient.Gauge({ name: 'football3d_connected_clients', help: 'Connected WebSocket clients' }),
+  roomPlayers: new promClient.Gauge({ name: 'football3d_room_players', help: 'Players per room and team', labelNames: ['room','team'] }),
+  goalsTotal: new promClient.Counter({ name: 'football3d_goals_total', help: 'Goals scored', labelNames: ['room','team'] }),
+  physicsDuration: new promClient.Histogram({ name: 'football3d_update_physics_seconds', help: 'Duration of updateGamePhysics()', buckets: [0.001,0.003,0.005,0.01,0.02,0.05,0.1] })
+};
+app.get('/metrics', async (req, res) => {
+  try {
+    res.set('Content-Type', promClient.register.contentType);
+    res.end(await promClient.register.metrics());
+  } catch (e) {
+    res.status(500).send(String(e));
+  }
+});
+
 
 // Configuración de Socket.IO
 const io = new Server(httpServer, {
@@ -101,8 +119,10 @@ availableSalas.forEach(roomId => {
     gameOverData: null,     // Datos del resultado final
     gameLoopInterval: null, // ID del intervalo del bucle principal
     playerMovements: new Map() // Mapa de socket.id -> { moveDirection: Vector3 }
-  };
+};
+  try { metrics.roomPlayers.labels(roomId, 'left').set(0); metrics.roomPlayers.labels(roomId, 'right').set(0); } catch {}
 });
+
 
 
 // --- Rutas API (Ej: Status) ---
@@ -254,7 +274,10 @@ function startGame(roomId, state) {
     state.lastUpdateTime = performance.now();
     state.gameLoopInterval = setInterval(() => {
       // Separar lógica de física y emisión
+      const endTimer = metrics.physicsDuration.startTimer();
       updateGamePhysics(roomId, state);
+      try { endTimer(); } catch {}
+      
       emitGameState(roomId, state);
     }, 1000 / PHYSICS_TICK_RATE);
     console.log(`[${roomId}] Bucle de juego iniciado para ${roomId}.`);
@@ -352,6 +375,8 @@ function handleGoal(roomId, state, scoringTeam) {
     state.score.right++;
     console.log(`[${roomId}] Gol para equipo DERECHO. Score: ${state.score.left}-${state.score.right}`);
   }
+
+try { metrics.goalsTotal.labels(roomId, scoringTeam).inc(); } catch {}
 
   io.to(roomId).emit('goalScored', { team: scoringTeam, score: state.score });
 
@@ -561,6 +586,8 @@ function updateGamePhysics(roomId, state) {
 
 // --- Emisión de Estado ---
 function emitGameState(roomId, state) {
+try { metrics.roomPlayers.labels(roomId, 'left').set(state.teams.left.size); metrics.roomPlayers.labels(roomId, 'right').set(state.teams.right.size); } catch {}
+
   // Crear payload solo con datos necesarios para el cliente
   const playersData = Array.from(state.players.values()).map(p => ({
     id: p.id,
@@ -588,6 +615,7 @@ function emitGameState(roomId, state) {
 
 // --- Manejadores de Eventos de Socket.IO ---
 io.on('connection', (socket) => {
+try { metrics.connectedClients.inc(); } catch {}
   console.log(`++ Cliente conectado: ${socket.id}`);
   let currentRoomId = null; // ID de la sala para este socket
 
@@ -938,6 +966,7 @@ io.on('connection', (socket) => {
 
   // Handler 'disconnect'
   socket.on('disconnect', (reason) => {
+try { metrics.connectedClients.dec(); } catch {}
     console.log(`-- Cliente desconectado: ${socket.id}. Sala: ${currentRoomId || 'N/A'}. Razón: ${reason}`);
     if (!currentRoomId) return; // Si nunca se unió a una sala
 
