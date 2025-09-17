@@ -921,9 +921,10 @@ const Game = () => {
         console.log('Configurando socket con (Nginx Path):', { publicGameUrl, roomId });
 
         try {
+            const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
             const socket = io(publicGameUrl, {
-                // Permitir fallback a polling si WS falla (evita TransportError)
-                transports: ['websocket', 'polling'],
+                // En local permitimos fallback a polling; en VPS solo websocket
+                transports: isLocalhost ? ['websocket', 'polling'] : ['websocket'],
                 reconnection: true,
                 reconnectionAttempts: 5,
                 reconnectionDelay: 1000,
