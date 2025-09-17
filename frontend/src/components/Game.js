@@ -13,16 +13,17 @@ import TeamSelectionScreen from './TeamSelectionScreen'
 import MobileJoystick from './MobileJoystick';  // <-- Añadir esta línea
 import LanguageSelector from '../i18n/LanguageSelector';
 import { useTranslation } from '../i18n/LanguageContext';
-import { useSearchParams, useNavigate } from 'react-router-dom';
+import { useSearchParams } from 'react-router-dom';
 
 
 const Game = () => {
     const [searchParams, setSearchParams] = useSearchParams();
-    const navigate = useNavigate();
 
-    // Get roomId from query parameter and validate
+    // Get roomId from query parameter and validate (parametrizable por env)
     const roomParam = searchParams.get('room');
-    const roomId = roomParam ? `room${roomParam}` : null;
+    const roomPrefix = process.env.REACT_APP_ROOM_PREFIX || 'room';
+    const availableRooms = (process.env.REACT_APP_ROOMS || '1,2').split(',').map(s => `${roomPrefix}${s.trim()}`);
+    const roomId = roomParam ? `${roomPrefix}${roomParam}` : null;
 
     // Debug logging
     console.group('Game Component URL Parameters');
@@ -45,7 +46,7 @@ const Game = () => {
     const [playerName, setPlayerName] = useState(null);
     const [isConnected, setIsConnected] = useState(false);
     const [sceneReady, setSceneReady] = useState(false);
-    const [connectedPlayers, setConnectedPlayers] = useState([]);
+    const [, setConnectedPlayers] = useState([]);
     const [chatMessages, setChatMessages] = useState([]);
     const [chatInput, setChatInput] = useState('');
     const [isLoading, setIsLoading] = useState(true);
@@ -55,9 +56,78 @@ const Game = () => {
 
     const [showingEndMessage, setShowingEndMessage] = useState(false);
 
+    // Feedback visual para goles
+    const [goalFeedback, setGoalFeedback] = useState({ visible: false, team: null });
+    const goalTimeoutRef = useRef(null);
+    const confettiCanvasRef = useRef(null);
+    const confettiAnimRef = useRef(null);
+    const rootRef = useRef(null);
+    const [shakeScreen, setShakeScreen] = useState(false);
+    const isRedirectingRef = useRef(false);
+
+    const startConfetti = useCallback((team) => {
+        const canvas = confettiCanvasRef.current;
+        if (!canvas) return;
+        const ctx = canvas.getContext('2d');
+        const w = canvas.width = window.innerWidth;
+        const h = canvas.height = window.innerHeight;
+
+        const colors = team === 'left'
+            ? ['#3b82f6', '#60a5fa', '#93c5fd', '#1e40af']
+            : ['#ef4444', '#f87171', '#fecaca', '#7f1d1d'];
+
+        const particles = Array.from({ length: Math.min(200, Math.floor((w * h) / 20000)) }).map(() => ({
+            x: Math.random() * w,
+            y: -20 - Math.random() * 200,
+            size: 4 + Math.random() * 6,
+            speedY: 2 + Math.random() * 3,
+            speedX: -2 + Math.random() * 4,
+            rotation: Math.random() * Math.PI * 2,
+            rotationSpeed: (-0.2 + Math.random() * 0.4),
+            color: colors[Math.floor(Math.random() * colors.length)],
+            shape: Math.random() > 0.5 ? 'rect' : 'circle'
+        }));
+
+        let start = performance.now();
+        const duration = 1800; // ms
+
+        const step = (t) => {
+            const elapsed = t - start;
+            ctx.clearRect(0, 0, w, h);
+            particles.forEach(p => {
+                p.x += p.speedX;
+                p.y += p.speedY;
+                p.rotation += p.rotationSpeed;
+                if (p.y > h + 20) p.y = -20;
+                if (p.x < -20) p.x = w + 20;
+                if (p.x > w + 20) p.x = -20;
+                ctx.save();
+                ctx.translate(p.x, p.y);
+                ctx.rotate(p.rotation);
+                ctx.fillStyle = p.color;
+                if (p.shape === 'rect') {
+                    ctx.fillRect(-p.size / 2, -p.size / 2, p.size, p.size * 0.6);
+                } else {
+                    ctx.beginPath();
+                    ctx.arc(0, 0, p.size / 2, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+                ctx.restore();
+            });
+            if (elapsed < duration) {
+                confettiAnimRef.current = requestAnimationFrame(step);
+            } else {
+                ctx.clearRect(0, 0, w, h);
+                confettiAnimRef.current = null;
+            }
+        };
+
+        if (confettiAnimRef.current) cancelAnimationFrame(confettiAnimRef.current);
+        confettiAnimRef.current = requestAnimationFrame(step);
+    }, []);
+
     // Añadir nuevo estado para el personaje
     const [selectedCharacter, setSelectedCharacter] = useState(null);
-    const [currentDirection, setCurrentDirection] = useState(null);
 
     // En Game.js, añade estos nuevos estados:
     const [teamSelected, setTeamSelected] = useState(false);
@@ -96,8 +166,56 @@ const Game = () => {
 
     const chatMessagesRef = useRef(null);
     // Añadir estado para el chat móvil
-    const [chatVisible, setChatVisible] = useState(false);
+    // const [chatVisible, setChatVisible] = useState(false);
     const [isMobileChatExpanded, setIsMobileChatExpanded] = useState(false);
+
+    // Mantener estado de teclas presionadas para movimiento combinado
+    const keysPressed = useRef({
+        up: false,
+        down: false,
+        left: false,
+        right: false,
+    });
+
+    // Vector analógico del joystick (móvil)
+    const joystickMoveRef = useRef({ x: 0, z: 0 });
+    // Último vector emitido y control de keepalive
+    const lastEmittedMoveRef = useRef({ x: 0, z: 0 });
+    const lastEmitTimeRef = useRef(0);
+
+    const vectorsApproximatelyEqual = (a, b, epsilon = 0.01) => {
+        return Math.abs(a.x - b.x) < epsilon && Math.abs(a.z - b.z) < epsilon;
+    };
+
+    const sendMovement = useCallback(() => {
+        if (!socketRef.current || !gameStarted) return;
+        // Combinar teclado + joystick
+        let moveX = 0;
+        let moveZ = 0;
+        if (keysPressed.current.up) moveZ += 1;
+        if (keysPressed.current.down) moveZ -= 1;
+        if (keysPressed.current.left) moveX -= 1;
+        if (keysPressed.current.right) moveX += 1;
+        // Sumar joystick (ya es vector en rango [-1,1])
+        moveX += joystickMoveRef.current.x;
+        moveZ += joystickMoveRef.current.z;
+
+        // Normalizar
+        const length = Math.hypot(moveX, moveZ);
+        let move = { x: 0, z: 0 };
+        if (length > 0) {
+            move = { x: moveX / length, z: moveZ / length };
+        }
+
+        // Enviar solo si cambió o cada 150ms como keepalive
+        const now = performance.now();
+        const shouldEmit = !vectorsApproximatelyEqual(move, lastEmittedMoveRef.current) || (now - lastEmitTimeRef.current) > 150;
+        if (shouldEmit) {
+            socketRef.current.volatile.emit('playerMove', move);
+            lastEmittedMoveRef.current = move;
+            lastEmitTimeRef.current = now;
+        }
+    }, [gameStarted]);
 
     const createControlEffect = (scene, advancedTexture) => {
         // Crear un anillo alrededor del jugador
@@ -296,11 +414,11 @@ const Game = () => {
             const ground = BABYLON.MeshBuilder.CreateGround('ground', {
                 width: FIELD_WIDTH,
                 height: FIELD_HEIGHT,
-                subdivisions: isMobile ? 32 : 64
+                subdivisions: 64 // Mantener misma calidad en móvil
             }, scene);
 
             // Generar textura de césped procedural
-            const grassTexture = new BABYLON.DynamicTexture("proceduralGrass", isMobile ? 512 : 1024, scene);
+            const grassTexture = new BABYLON.DynamicTexture("proceduralGrass", 1024, scene);
             const ctx = grassTexture.getContext();
 
             // Color base del césped
@@ -317,7 +435,7 @@ const Game = () => {
             ];
 
             // Generar variaciones de color
-            for (let i = 0; i < (isMobile ? 1000 : 2000); i++) {
+            for (let i = 0; i < 2000; i++) {
                 const x = Math.random() * grassTexture.getSize().width;
                 const y = Math.random() * grassTexture.getSize().height;
                 const radius = 5 + Math.random() * 15;
@@ -331,12 +449,12 @@ const Game = () => {
             }
 
             // Añadir líneas de corte
-            const linesCount = isMobile ? 10 : 20;
+            const linesCount = 20;
             for (let i = 0; i < linesCount; i++) {
                 const y = (i / linesCount) * grassTexture.getSize().height;
                 ctx.beginPath();
                 ctx.strokeStyle = i % 2 === 0 ? "#2d7023" : "#225219";
-                ctx.lineWidth = isMobile ? 5 : 10;
+                ctx.lineWidth = 10;
                 ctx.globalAlpha = 0.2;
                 ctx.moveTo(0, y);
                 ctx.lineTo(grassTexture.getSize().width, y);
@@ -358,12 +476,12 @@ const Game = () => {
 
             // Añadir líneas del campo
             const linesTexture = new BABYLON.DynamicTexture("linesTexture",
-                { width: isMobile ? 512 : 1024, height: isMobile ? 512 : 1024 }, scene);
+                { width: 1024, height: 1024 }, scene);
             const linesCtx = linesTexture.getContext();
 
             // Dibujar líneas del campo
             linesCtx.strokeStyle = "white";
-            linesCtx.lineWidth = isMobile ? 3 : 5;
+            linesCtx.lineWidth = 5;
 
             // Líneas exteriores
             linesCtx.strokeRect(10, 10, linesTexture.getSize().width - 20,
@@ -406,7 +524,7 @@ const Game = () => {
         };
 
         // Crear el campo
-        const ground = createProceduralField(scene);
+        createProceduralField(scene);
 
         // Pelota
         const ball = BABYLON.MeshBuilder.CreateSphere('ball', { diameter: 1 }, scene);
@@ -557,7 +675,7 @@ const Game = () => {
             return;
         }
 
-        const { players, ballPosition, score, connectedPlayers } = gameState;
+        const { players, ballPosition, score, connectedPlayers, controllingPlayerId, controlRemainingMs } = gameState;
 
         // Actualizar jugadores
         if (players && Array.isArray(players)) {
@@ -722,11 +840,34 @@ const Game = () => {
             scoreTextRef.current.right.text = rightScore.toString();
         }
 
+        // Mostrar feedback de control de balón (halo/partículas/texto)
+        if (controlEffectsRef.current && ballRef.current) {
+            const hasControl = !!controllingPlayerId && controlRemainingMs > 0;
+            controlEffectsRef.current.ballHalo.isVisible = hasControl;
+            controlEffectsRef.current.controlRing.isVisible = hasControl;
+            controlEffectsRef.current.controlTimeText.isVisible = hasControl;
+            if (hasControl) {
+                // Position halo already updated in beforeRender; update ring to follow controlling player if available
+                const controllingMesh = playersRef.current[controllingPlayerId];
+                if (controllingMesh) {
+                    controlEffectsRef.current.controlRing.position = controllingMesh.position.clone();
+                    controlEffectsRef.current.controlRing.position.y = 0.1;
+                }
+                const seconds = Math.ceil(controlRemainingMs / 100) / 10; // one decimal
+                controlEffectsRef.current.controlTimeText.text = `${seconds.toFixed(1)}s`;
+                controlEffectsRef.current.controlTimeText.top = isMobile ? '40px' : '20px';
+                controlEffectsRef.current.controlTimeText.linkWithMesh(ballRef.current);
+            } else {
+                controlEffectsRef.current.stopParticles();
+                controlEffectsRef.current.controlTimeText.text = '';
+            }
+        }
+
         // Actualizar lista de jugadores conectados
         if (connectedPlayers) {
             setConnectedPlayers(connectedPlayers);
         }
-    }, [sceneReady]);
+    }, [sceneReady, isMobile]);
 
     const handleJoinGame = (name) => {
         socketRef.current.emit('joinGame', { name: name.trim(), roomId: roomId });
@@ -743,25 +884,29 @@ const Game = () => {
         }
     };
 
-    const handleChatToggle = () => {
-        setChatVisible(!chatVisible);
-    };
+    // const handleChatToggle = () => {
+    //     setChatVisible(!chatVisible);
+    // };
 
-    // Validate room and redirect if invalid
+    // Validate room and redirect if invalid (usa REACT_APP_ROOMS)
     useEffect(() => {
         console.group('Room Validation');
         console.log('Validando sala:', roomId);
-
-        const isValidRoom = roomId === 'room1' || roomId === 'room2';
+        const isValidRoom = !!roomId && availableRooms.includes(roomId);
 
         if (!isValidRoom) {
-            console.warn('Sala no válida, redirigiendo a room1');
-            setSearchParams({ room: '1' });
+            const firstRoom = (process.env.REACT_APP_ROOMS || '1,2').split(',')[0].trim();
+            console.warn('Sala no válida, redirigiendo a', `${roomPrefix}${firstRoom}`);
+            isRedirectingRef.current = true;
+            setSearchParams({ room: firstRoom || '1' });
+            console.groupEnd();
+            return;
         }
 
         console.log('Sala válida:', isValidRoom);
+        isRedirectingRef.current = false;
         console.groupEnd();
-    }, [roomId, setSearchParams]);
+    }, [roomId, setSearchParams, availableRooms, roomPrefix]);
 
     // Modified socket setup
     const setupSocket = useCallback(() => {
@@ -772,21 +917,17 @@ const Game = () => {
             return null;
         }
 
-        const publicGameUrl = process.env.REACT_APP_GAME_SERVER_URL || 'https://football-online-3d.dantecollazzi.com';
-        console.log('Configurando socket con (Nginx Path):', {
-            publicGameUrl,
-            roomId
-
-        });
+        const publicGameUrl = process.env.REACT_APP_GAME_SERVER_URL || (window.location.hostname === 'localhost' ? 'http://localhost:4000' : 'https://football-online-3d.dantecollazzi.com');
+        console.log('Configurando socket con (Nginx Path):', { publicGameUrl, roomId });
 
         try {
-            const socket = io(/* publicGameUrl, */ {
-
-                transports: ['websocket'],
-                // secure: publicGameUrl.startsWith('https'),
+            const socket = io(publicGameUrl, {
+                // Permitir fallback a polling si WS falla (evita TransportError)
+                transports: ['websocket', 'polling'],
                 reconnection: true,
                 reconnectionAttempts: 5,
                 reconnectionDelay: 1000,
+                withCredentials: true,
             });
 
             // 5. OPCIONAL: Actualiza este log
@@ -844,7 +985,9 @@ const Game = () => {
         console.log('Ejecutando useEffect principal. RoomId:', roomId);
 
         if (!roomId) {
-            console.warn('roomId no definido...');
+            if (!isRedirectingRef.current) {
+                console.warn('roomId no definido...');
+            }
             console.groupEnd();
             return;
         }
@@ -920,7 +1063,17 @@ const Game = () => {
         const handleGoalScored = ({ team, score }) => {
             console.log(`>>> Gol anotado por equipo ${team}`);
             setScore(score);
-            // Mostrar animación o notificación de gol
+            // Feedback visual de gol
+            setGoalFeedback({ visible: true, team });
+            // Sacudir pantalla y confeti
+            setShakeScreen(true);
+            setTimeout(() => setShakeScreen(false), 500);
+            startConfetti(team);
+            if (goalTimeoutRef.current) clearTimeout(goalTimeoutRef.current);
+            goalTimeoutRef.current = setTimeout(() => {
+                setGoalFeedback({ visible: false, team: null });
+                goalTimeoutRef.current = null;
+            }, 2200);
         };
 
         const handleGameOver = (gameOverData) => {
@@ -1036,9 +1189,17 @@ const Game = () => {
                 socket.off('selectCharacterError', handleSelectCharacterError);
                 socket.off('readyError', handleReadyError);
             }
+            if (goalTimeoutRef.current) {
+                clearTimeout(goalTimeoutRef.current);
+                goalTimeoutRef.current = null;
+            }
+            if (confettiAnimRef.current) {
+                cancelAnimationFrame(confettiAnimRef.current);
+                confettiAnimRef.current = null;
+            }
             console.groupEnd();
         };
-    }, [roomId, createScene, setupSocket, updateGameState, hasJoined, playerName]);
+    }, [roomId, createScene, setupSocket, updateGameState, hasJoined, playerName, startConfetti]);
 
     useEffect(() => {
         const checkMobile = () => {
@@ -1054,10 +1215,9 @@ const Game = () => {
     useEffect(() => {
         const handleVisibilityChange = () => {
             if (document.hidden && socketRef.current) {
-                // Detener todos los movimientos cuando la página no está visible
-                ['up', 'down', 'left', 'right'].forEach(direction => {
-                    socketRef.current.volatile.emit('playerMoveStop', { direction });
-                });
+                // Detener el movimiento enviando vector cero cuando la página no está visible
+                keysPressed.current = { up: false, down: false, left: false, right: false };
+                socketRef.current.volatile.emit('playerMove', { x: 0, z: 0 });
             }
         };
 
@@ -1083,112 +1243,104 @@ const Game = () => {
         }
     };
 
-    // Modificar la gestión de movimiento para soportar controles táctiles
+    // Modificar la gestión de movimiento para soportar controles táctiles con vector
     const handleDirectionChange = useCallback((direction) => {
-        if (!socketRef.current) return;
-
-        // Detener inmediatamente la dirección anterior
-        if (currentDirection && direction !== currentDirection) {
-            socketRef.current.volatile.emit('playerMoveStop', {
-                direction: currentDirection
-            });
-        }
-
-        // Iniciar inmediatamente la nueva dirección
+        if (!gameStarted) return;
+        // Acepta direcciones cardinales o vector {x,z}
+        let moveVector = { x: 0, z: 0 };
         if (direction) {
-            socketRef.current.volatile.emit('playerMoveStart', { direction });
+            if (typeof direction === 'string') {
+                switch (direction) {
+                    case 'up': moveVector.z = 1; break;
+                    case 'down': moveVector.z = -1; break;
+                    case 'left': moveVector.x = -1; break;
+                    case 'right': moveVector.x = 1; break;
+                    default: break;
+                }
+            } else if (typeof direction === 'object' && direction !== null &&
+                typeof direction.x === 'number' && typeof direction.z === 'number') {
+                moveVector = { x: direction.x, z: direction.z };
+            }
         }
-
-        setCurrentDirection(direction);
-    }, [currentDirection]);
+        // Guardar como vector del joystick y emitir combinado a través de sendMovement
+        joystickMoveRef.current = moveVector;
+        sendMovement();
+    }, [gameStarted, sendMovement]);
 
     // Manejadores de eventos de teclado para movimiento
     const handleKeyDown = useCallback((e) => {
-        if (chatInputFocusRef.current) return; // No procesar teclas si el chat está enfocado
-
+        if (chatInputFocusRef.current) return;
         if (!socketRef.current || !isConnected || !gameStarted) return;
 
-        let direction = null;
-
+        let keyChanged = false;
         switch (e.key.toLowerCase()) {
-            case 'w':
-            case 'arrowup':
-                direction = 'up';
+            case 'w': case 'arrowup':
+                if (!keysPressed.current.up) { keysPressed.current.up = true; keyChanged = true; }
                 break;
-            case 's':
-            case 'arrowdown':
-                direction = 'down';
+            case 's': case 'arrowdown':
+                if (!keysPressed.current.down) { keysPressed.current.down = true; keyChanged = true; }
                 break;
-            case 'a':
-            case 'arrowleft':
-                direction = 'left';
+            case 'a': case 'arrowleft':
+                if (!keysPressed.current.left) { keysPressed.current.left = true; keyChanged = true; }
                 break;
-            case 'd':
-            case 'arrowright':
-                direction = 'right';
+            case 'd': case 'arrowright':
+                if (!keysPressed.current.right) { keysPressed.current.right = true; keyChanged = true; }
                 break;
             case ' ':
-                // Controlar balón (espacio)
                 socketRef.current.emit('ballControl', { control: true });
-                return;
+                break;
             default:
-                return;
+                break;
         }
-
-        if (direction) {
-            socketRef.current.emit('playerMoveStart', { direction });
-            setCurrentDirection(direction);
-        }
-    }, [isConnected, gameStarted]);
+        if (keyChanged) sendMovement();
+    }, [isConnected, gameStarted, sendMovement]);
 
     const handleKeyUp = useCallback((e) => {
         if (chatInputFocusRef.current) return;
-
         if (!socketRef.current || !isConnected) return;
 
-        let direction = null;
-
+        let keyChanged = false;
         switch (e.key.toLowerCase()) {
-            case 'w':
-            case 'arrowup':
-                direction = 'up';
+            case 'w': case 'arrowup':
+                if (keysPressed.current.up) { keysPressed.current.up = false; keyChanged = true; }
                 break;
-            case 's':
-            case 'arrowdown':
-                direction = 'down';
+            case 's': case 'arrowdown':
+                if (keysPressed.current.down) { keysPressed.current.down = false; keyChanged = true; }
                 break;
-            case 'a':
-            case 'arrowleft':
-                direction = 'left';
+            case 'a': case 'arrowleft':
+                if (keysPressed.current.left) { keysPressed.current.left = false; keyChanged = true; }
                 break;
-            case 'd':
-            case 'arrowright':
-                direction = 'right';
+            case 'd': case 'arrowright':
+                if (keysPressed.current.right) { keysPressed.current.right = false; keyChanged = true; }
                 break;
             case ' ':
-                // Soltar balón (espacio)
                 socketRef.current.emit('ballControl', { control: false });
-                return;
+                break;
             default:
-                return;
+                break;
         }
-
-        if (direction && direction === currentDirection) {
-            socketRef.current.emit('playerMoveStop', { direction });
-            setCurrentDirection(null);
-        }
-    }, [isConnected, currentDirection]);
+        if (keyChanged) sendMovement();
+    }, [isConnected, sendMovement]);
 
     // Añadir useEffect para los event listeners de teclado
     useEffect(() => {
         window.addEventListener('keydown', handleKeyDown);
         window.addEventListener('keyup', handleKeyUp);
 
+        // Bucle rAF ligero para mantener movimiento suave y keepalive
+        let rafId = null;
+        const loop = () => {
+            sendMovement();
+            rafId = window.requestAnimationFrame(loop);
+        };
+        rafId = window.requestAnimationFrame(loop);
+
         return () => {
             window.removeEventListener('keydown', handleKeyDown);
             window.removeEventListener('keyup', handleKeyUp);
+            if (rafId) window.cancelAnimationFrame(rafId);
         };
-    }, [handleKeyDown, handleKeyUp]);
+    }, [handleKeyDown, handleKeyUp, sendMovement]);
 
     // Monitor state changes
     useEffect(() => {
@@ -1223,7 +1375,7 @@ const Game = () => {
     }
 
     return (
-        <div style={{
+        <div ref={rootRef} style={{
             position: 'fixed',
             top: 0,
             left: 0,
@@ -1233,7 +1385,8 @@ const Game = () => {
             WebkitTapHighlightColor: 'transparent',
             WebkitTouchCallout: 'none',
             userSelect: 'none',
-            touchAction: 'none'
+            touchAction: 'none',
+            animation: shakeScreen ? 'screenShake 0.5s ease' : 'none'
         }}>
 
 
@@ -1286,6 +1439,51 @@ const Game = () => {
                     height: '100%',
                     display: 'block',
                     touchAction: 'none'
+                }}
+            />
+
+            {/* Overlay de Gol */}
+            {goalFeedback.visible && (
+                <div style={{
+                    position: 'absolute',
+                    top: '50%',
+                    left: '50%',
+                    transform: 'translate(-50%, -50%) scale(1)',
+                    color: 'white',
+                    backgroundColor: goalFeedback.team === 'left' ? 'rgba(59, 130, 246, 0.85)' : 'rgba(239, 68, 68, 0.85)',
+                    padding: isMobile ? '12px 20px' : '18px 28px',
+                    borderRadius: '12px',
+                    fontSize: isMobile ? '28px' : '40px',
+                    fontWeight: 800,
+                    letterSpacing: '2px',
+                    boxShadow: '0 8px 30px rgba(0,0,0,0.35)',
+                    zIndex: 100,
+                    backdropFilter: 'blur(2px)',
+                    pointerEvents: 'none',
+                    animation: 'goalPop 0.4s ease-out, goalFade 2.2s ease-in forwards'
+                }}>
+                    {t('gameUI.goal') || 'GOAL!'}
+                    <div style={{
+                        marginTop: isMobile ? '6px' : '8px',
+                        fontSize: isMobile ? '12px' : '14px',
+                        opacity: 0.9
+                    }}>
+                        {goalFeedback.team === 'left' ? (t('teamSelection.mammals') || 'Mammals') : (t('teamSelection.reptiles') || 'Reptiles')}
+                    </div>
+                </div>
+            )}
+
+            {/* Canvas de confeti */}
+            <canvas
+                ref={confettiCanvasRef}
+                style={{
+                    position: 'absolute',
+                    top: 0,
+                    left: 0,
+                    width: '100%',
+                    height: '100%',
+                    pointerEvents: 'none',
+                    zIndex: 90
                 }}
             />
 
@@ -1435,9 +1633,14 @@ const Game = () => {
                                 alignItems: 'center'
                             }}>
                                 <MobileJoystick
-                                    onDirectionChange={(direction) => {
-                                        console.log('Dirección:', direction);
-                                        handleDirectionChange(direction);
+                                    onDirectionChange={(vector) => {
+                                        console.log('Vector:', vector);
+                                        handleDirectionChange(vector);
+                                    }}
+                                    onBallControlChange={(control) => {
+                                        if (socketRef.current) {
+                                            socketRef.current.emit('ballControl', { control });
+                                        }
                                     }}
                                 />
                             </div>
@@ -1813,3 +2016,21 @@ const Game = () => {
 };
 
 export default Game;
+/* CSS-in-JS keyframes (inserted as a global style once) */
+if (typeof document !== 'undefined' && !document.getElementById('goal-animations')) {
+    const style = document.createElement('style');
+    style.id = 'goal-animations';
+    style.innerHTML = `
+      @keyframes goalPop { from { transform: translate(-50%, -50%) scale(0.6); opacity: 0 } to { transform: translate(-50%, -50%) scale(1); opacity: 1 } }
+      @keyframes goalFade { 0% { opacity: 1 } 75% { opacity: 1 } 100% { opacity: 0 } }
+      @keyframes screenShake {
+        0% { transform: translate(0, 0) }
+        20% { transform: translate(4px, -3px) }
+        40% { transform: translate(-3px, 4px) }
+        60% { transform: translate(3px, -4px) }
+        80% { transform: translate(-4px, 3px) }
+        100% { transform: translate(0, 0) }
+      }
+    `;
+    document.head.appendChild(style);
+}

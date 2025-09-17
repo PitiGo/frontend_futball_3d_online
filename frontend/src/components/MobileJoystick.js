@@ -1,42 +1,36 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useRef } from 'react';
 
-const MobileJoystick = ({ onDirectionChange }) => {
+const MobileJoystick = ({ onDirectionChange, onBallControlChange }) => {
     const [isActive, setIsActive] = useState(false);
     const [currentDirection, setCurrentDirection] = useState(null);
     const [stickPosition, setStickPosition] = useState({ x: 0, y: 0 });
-    const joystickRef = React.useRef(null);
-    const lastEmitTimeRef = React.useRef(0);
+    const joystickRef = useRef(null);
+    const isPointerDownRef = useRef(false);
 
     // Simplificar throttleEmit
-    const throttleEmit = useCallback((direction) => {
-        // Eliminamos el throttling para tener respuesta inmediata
-        onDirectionChange(direction);
+    const throttleEmit = useCallback((vector) => {
+        onDirectionChange && onDirectionChange(vector);
     }, [onDirectionChange]);
 
-    const calculateDirection = useCallback((deltaX, deltaY) => {
-        const angle = Math.atan2(deltaY, deltaX);
+    const calculateVector = useCallback((deltaX, deltaY) => {
         const distance = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
         const maxDistance = 50;
         const deadzone = 10;
-    
+
         if (distance < deadzone) {
             setStickPosition({ x: 0, y: 0 });
-            return null;
+            return { x: 0, z: 0 };
         }
-    
-        // Normalizar la posición del stick
-        const normalizedDistance = Math.min(distance, maxDistance);
-        const normalizedX = (deltaX / distance) * normalizedDistance;
-        const normalizedY = (deltaY / distance) * normalizedDistance;
-        setStickPosition({ x: normalizedX, y: normalizedY });
-    
-        let degrees = ((angle * 180) / Math.PI + 360) % 360;
-    
-        // Zonas de dirección ajustadas
-        if (degrees >= 45 && degrees < 135) return 'down';
-        if (degrees >= 135 && degrees < 225) return 'left';
-        if (degrees >= 225 && degrees < 315) return 'up';
-        return 'right';
+
+        const clampedDist = Math.min(distance, maxDistance);
+        const stickX = (deltaX / distance) * clampedDist;
+        const stickY = (deltaY / distance) * clampedDist;
+        setStickPosition({ x: stickX, y: stickY });
+
+        // Vector normalizado a [-1,1]; z positivo = arriba pantalla (deltaY negativo)
+        const normX = stickX / maxDistance;
+        const normZ = (-stickY) / maxDistance;
+        return { x: normX, z: normZ };
     }, []);
     const handleInput = useCallback((clientX, clientY) => {
         if (!joystickRef.current) return;
@@ -48,26 +42,53 @@ const MobileJoystick = ({ onDirectionChange }) => {
         const deltaX = clientX - centerX;
         const deltaY = clientY - centerY;
 
-        const newDirection = calculateDirection(deltaX, deltaY);
-
-        // Emitir siempre una nueva dirección, incluso si es la misma
-        setCurrentDirection(newDirection);
-        if (newDirection) {
-            // Si hay una dirección activa, siempre la emitimos
-            onDirectionChange(newDirection);
-        } else {
-            // Solo emitimos null cuando realmente no hay dirección
-            onDirectionChange(null);
+        const vector = calculateVector(deltaX, deltaY);
+        // Mantener un indicador textual simple
+        let dirLabel = '•';
+        if (Math.abs(vector.x) > 0.1 || Math.abs(vector.z) > 0.1) {
+            const angleDeg = (Math.atan2(-vector.z, vector.x) * 180) / Math.PI;
+            const deg = (angleDeg + 360) % 360;
+            if (deg >= 45 && deg < 135) dirLabel = 'up';
+            else if (deg >= 135 && deg < 225) dirLabel = 'left';
+            else if (deg >= 225 && deg < 315) dirLabel = 'down';
+            else dirLabel = 'right';
         }
-    }, [calculateDirection, onDirectionChange]);
+        setCurrentDirection(dirLabel);
+        throttleEmit(vector);
+    }, [calculateVector, throttleEmit]);
 
     // Manejadores de eventos unificados
     const handleStart = useCallback((e) => {
         e.preventDefault();
         setIsActive(true);
+        isPointerDownRef.current = true;
         const point = e.touches ? e.touches[0] : e;
         handleInput(point.clientX, point.clientY);
-    }, [handleInput]);
+
+        // Capturar movimiento global para no parar al salir del círculo
+        const moveListener = (ev) => {
+            const p = ev.touches ? ev.touches[0] : ev;
+            handleInput(p.clientX, p.clientY);
+        };
+        const endListener = (ev) => {
+            ev.preventDefault();
+            isPointerDownRef.current = false;
+            setIsActive(false);
+            setStickPosition({ x: 0, y: 0 });
+            setCurrentDirection(null);
+            throttleEmit({ x: 0, z: 0 });
+            window.removeEventListener('mousemove', moveListener);
+            window.removeEventListener('mouseup', endListener);
+            window.removeEventListener('touchmove', moveListener);
+            window.removeEventListener('touchend', endListener);
+            window.removeEventListener('touchcancel', endListener);
+        };
+        window.addEventListener('mousemove', moveListener, { passive: false });
+        window.addEventListener('mouseup', endListener, { passive: false });
+        window.addEventListener('touchmove', moveListener, { passive: false });
+        window.addEventListener('touchend', endListener, { passive: false });
+        window.addEventListener('touchcancel', endListener, { passive: false });
+    }, [handleInput, throttleEmit]);
 
     const handleMove = useCallback((e) => {
         e.preventDefault();
@@ -78,11 +99,8 @@ const MobileJoystick = ({ onDirectionChange }) => {
 
     const handleEnd = useCallback((e) => {
         e.preventDefault();
-        setIsActive(false);
-        setStickPosition({ x: 0, y: 0 });
-        setCurrentDirection(null);
-        onDirectionChange(null);
-    }, [onDirectionChange]);
+        // No hacemos nada aquí; el final global limpia estado
+    }, []);
 
     return (
         <div style={{
@@ -115,7 +133,7 @@ const MobileJoystick = ({ onDirectionChange }) => {
                 onMouseDown={handleStart}
                 onMouseMove={handleMove}
                 onMouseUp={handleEnd}
-                onMouseLeave={handleEnd}
+                onMouseLeave={() => { /* no detener al salir */ }}
                 onTouchStart={handleStart}
                 onTouchMove={handleMove}
                 onTouchEnd={handleEnd}
@@ -176,6 +194,33 @@ const MobileJoystick = ({ onDirectionChange }) => {
                     {currentDirection || '•'}
                 </div>
             </div>
+
+            {/* Botón de control de balón (mantener presionado) */}
+            <button
+                onMouseDown={(e) => { e.preventDefault(); onBallControlChange && onBallControlChange(true); }}
+                onMouseUp={(e) => { e.preventDefault(); onBallControlChange && onBallControlChange(false); }}
+                onMouseLeave={(e) => { e.preventDefault(); onBallControlChange && onBallControlChange(false); }}
+                onTouchStart={(e) => { e.preventDefault(); onBallControlChange && onBallControlChange(true); }}
+                onTouchEnd={(e) => { e.preventDefault(); onBallControlChange && onBallControlChange(false); }}
+                onTouchCancel={(e) => { e.preventDefault(); onBallControlChange && onBallControlChange(false); }}
+                style={{
+                    position: 'fixed',
+                    bottom: '200px',
+                    right: '24px',
+                    width: '72px',
+                    height: '72px',
+                    borderRadius: '50%',
+                    background: 'rgba(255,255,255,0.25)',
+                    color: 'white',
+                    border: '1px solid rgba(255,255,255,0.3)',
+                    fontSize: '12px',
+                    fontWeight: 700,
+                    backdropFilter: 'blur(2px)',
+                    pointerEvents: 'auto'
+                }}
+            >
+                HOLD
+            </button>
         </div>
     );
 };
