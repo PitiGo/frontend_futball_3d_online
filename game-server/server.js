@@ -9,12 +9,20 @@ import { performance } from 'perf_hooks'; // Para performance.now() en Node.js
 
 const app = express();
 
-// Configuración específica de CORS para Express
-const allowedOrigins = [
+// Utilidades de configuración por entorno
+function parseEnvList(name, fallbackList) {
+  const raw = process.env[name];
+  if (!raw || typeof raw !== 'string') return fallbackList;
+  const list = raw.split(',').map(s => s.trim()).filter(Boolean);
+  return list.length ? list : fallbackList;
+}
+
+// Configuración específica de CORS para Express (parametrizable por env)
+const allowedOrigins = parseEnvList('ALLOWED_ORIGINS', [
   "https://football-online-3d.dantecollazzi.com",
   "https://www.dantecollazzi.com",
   "http://localhost:3000"
-];
+]);
 
 app.use(cors({
   origin: function (origin, callback) {
@@ -44,8 +52,8 @@ const io = new Server(httpServer, {
   }
 });
 
-// --- Constantes del Juego ---
-const availableSalas = ['room1', 'room2'];
+// --- Constantes del Juego (parametrizables) ---
+const availableSalas = parseEnvList('ROOMS', ['room1', 'room2']);
 const FIELD_WIDTH = 40;
 const FIELD_HEIGHT = 30;
 const BALL_RADIUS = 0.5;
@@ -63,7 +71,9 @@ const RESTITUTION = 0.6; // Coeficiente de restitución (elasticidad)
 const MAX_PLAYERS_PER_TEAM = 3;
 const GOALS_TO_WIN = 3;
 const BALL_CONTROL_RADIUS = 1.5;
-const BALL_RELEASE_BOOST = 10; // Aumentado para disparos más notables
+const BALL_RELEASE_BOOST = 10; // Deprecated (mantener compat)
+const BALL_RELEASE_MIN = 8;    // Velocidad mínima del disparo
+const BALL_RELEASE_MAX = 12;   // Velocidad máxima del disparo
 const PHYSICS_TICK_RATE = 60; // Hz
 const PHYSICS_DT = 1 / PHYSICS_TICK_RATE; // Delta time para física
 
@@ -97,6 +107,8 @@ availableSalas.forEach(roomId => {
     ballPosition: new Vector3(0, BALL_RADIUS, 0), // Inicia en el suelo
     ballVelocity: new Vector3(0, 0, 0),
     lastUpdateTime: performance.now(),
+    ballLastShotTime: 0,           // Timestamp del último disparo
+    ballFrictionCooldownMs: 250,   // Ventana sin fricción tras disparo
     goalScoredTimeout: null, // ID del temporizador para reiniciar tras gol
     gameOverData: null,     // Datos del resultado final
     gameLoopInterval: null, // ID del intervalo del bucle principal
@@ -444,8 +456,12 @@ function updateGamePhysics(roomId, state) {
   });
 
   // 2. Actualizar Pelota
-  // Aplicar fricción
-  state.ballVelocity.scaleInPlace(Math.pow(FRICTION, PHYSICS_DT / (1 / 60))); // Ajustar a DT
+  // Aplicar fricción (excepto inmediatamente después de un disparo)
+  const nowMs = performance.now();
+  const inShotWindow = (nowMs - state.ballLastShotTime) < state.ballFrictionCooldownMs;
+  if (!inShotWindow) {
+    state.ballVelocity.scaleInPlace(Math.pow(FRICTION, PHYSICS_DT / (1 / 60))); // Ajustar a DT
+  }
 
   // Integración de Euler
   state.ballPosition.addInPlace(state.ballVelocity.scale(PHYSICS_DT));
@@ -458,7 +474,7 @@ function updateGamePhysics(roomId, state) {
       handleGoal(roomId, state, scoringTeam);
       scored = true; // Marcar que se anotó para no procesar rebote
     } else {
-      // Rebote pared lateral
+      // Rebote pared lateral con conservación de momento: solo invertir componente X, mantener Z
       state.ballPosition.x = Math.sign(state.ballPosition.x) * (FIELD_WIDTH / 2 - BALL_RADIUS);
       state.ballVelocity.x *= -RESTITUTION;
     }
@@ -506,7 +522,13 @@ function updateGamePhysics(roomId, state) {
         console.log(`[${roomId}] ${player.name} pierde control por tiempo.`);
         player.isControllingBall = false;
         playerCurrentlyControllingId = null; // Liberar control
-        state.ballVelocity.set((Math.random() - 0.5) * 2, 0, (Math.random() - 0.5) * 2);
+        // Empuje en la dirección a la que mira al expirar
+        const forward = new Vector3(0, 0, 1);
+        const rotationMatrix = new Matrix();
+        player.rotation.toRotationMatrix(rotationMatrix);
+        const worldForward = Vector3.TransformNormal(forward, rotationMatrix).normalize();
+        const expireSpeed = 6; // menor que un disparo manual
+        state.ballVelocity = worldForward.scale(expireSpeed);
       } else {
         // Mantener pelota al frente
         const forward = new Vector3(0, 0, 1); // Local Z+
@@ -545,7 +567,7 @@ function updateGamePhysics(roomId, state) {
   });
 
   // 4. Limitar Velocidades y Detener Pelota
-  const maxBallSpeedSq = 20 * 20; // Aumentar velocidad máxima
+  const maxBallSpeedSq = 28 * 28; // Aumentar velocidad máxima para tiros fuertes
   if (state.ballVelocity.lengthSquared() > maxBallSpeedSq) {
     state.ballVelocity.normalize().scaleInPlace(Math.sqrt(maxBallSpeedSq));
   }
@@ -574,11 +596,23 @@ function emitGameState(roomId, state) {
     // ready: p.ready // Podría ser útil para la UI
   }));
 
+  // Calcular jugador que controla y tiempo restante
+  let controllingPlayerId = null;
+  let controlRemainingMs = 0;
+  state.players.forEach(p => {
+    if (p.isControllingBall) {
+      controllingPlayerId = p.id;
+      controlRemainingMs = Math.max(0, 3000 - (performance.now() - p.ballControlTime));
+    }
+  });
+
   const gameStatePayload = {
     players: playersData,
     ballPosition: vector3ToObject(state.ballPosition),
     score: state.score,
-    currentState: state.currentGameState // Enviar estado para UI cliente
+    currentState: state.currentGameState, // Enviar estado para UI cliente
+    controllingPlayerId,
+    controlRemainingMs
   };
 
   // Emitir a la sala específica
@@ -810,64 +844,7 @@ io.on('connection', (socket) => {
     // No emitimos nada aquí, el estado se envía en el bucle principal
   });
 
-  // Manejador para cuando el jugador comienza a moverse en una dirección
-  socket.on('playerMoveStart', ({ direction }) => {
-    if (!currentRoomId) return;
-    const state = salaStates[currentRoomId];
-    const movementState = state.playerMovements.get(socket.id);
-    const player = state.players.get(socket.id);
-
-    // Ignorar si el jugador no existe, no tiene estado de movimiento, o el juego no está en PLAYING
-    if (!movementState || !player || state.currentGameState !== gameStates.PLAYING) return;
-
-    console.log(`[${currentRoomId}] -> playerMoveStart de ${player.name} en dirección: ${direction}`);
-
-    // Convertir la dirección a un vector de movimiento
-    let moveX = 0, moveZ = 0;
-    switch (direction) {
-      case 'up': moveZ = 1; break;
-      case 'down': moveZ = -1; break;
-      case 'left': moveX = -1; break;
-      case 'right': moveX = 1; break;
-      default: return; // Dirección no reconocida
-    }
-
-    // Actualizar la dirección de movimiento
-    movementState.moveDirection.x = moveX;
-    movementState.moveDirection.z = moveZ;
-
-    // Normalizar si es necesario
-    if (movementState.moveDirection.lengthSquared() > 0.001) {
-      movementState.moveDirection.normalize();
-    }
-  });
-
-  // Manejador para cuando el jugador deja de moverse en una dirección
-  socket.on('playerMoveStop', ({ direction }) => {
-    if (!currentRoomId) return;
-    const state = salaStates[currentRoomId];
-    const movementState = state.playerMovements.get(socket.id);
-    const player = state.players.get(socket.id);
-
-    // Ignorar si el jugador no existe o no tiene estado de movimiento
-    if (!movementState || !player) return;
-
-    console.log(`[${currentRoomId}] -> playerMoveStop de ${player.name} en dirección: ${direction}`);
-
-    // Detener el movimiento en la dirección especificada
-    switch (direction) {
-      case 'up':
-      case 'down':
-        movementState.moveDirection.z = 0;
-        break;
-      case 'left':
-      case 'right':
-        movementState.moveDirection.x = 0;
-        break;
-      default:
-        return; // Dirección no reconocida
-    }
-  });
+  // Eliminados handlers playerMoveStart/playerMoveStop en favor de playerMove con vector
 
   // Handler 'ballControl'
   socket.on('ballControl', ({ control }) => {
@@ -903,11 +880,25 @@ io.on('connection', (socket) => {
         const forward = new Vector3(0, 0, 1); // Z local
         const rotationMatrix = new Matrix();
         player.rotation.toRotationMatrix(rotationMatrix);
-        const worldForward = Vector3.TransformNormal(forward, rotationMatrix).normalize();
+        let worldForward = Vector3.TransformNormal(forward, rotationMatrix).normalize();
 
-        // Aplicar impulso
-        state.ballVelocity = worldForward.scale(BALL_RELEASE_BOOST);
-        console.log(`[${currentRoomId}] Velocidad disparo: ${state.ballVelocity.length().toFixed(2)}`);
+        // Mezclar con dirección de movimiento si existe para mayor control
+        const movement = (salaStates[currentRoomId].playerMovements.get(socket.id)?.moveDirection) || Vector3.Zero();
+        if (movement.lengthSquared() > 0.01) {
+          worldForward = worldForward.add(movement).normalize();
+        }
+
+        // Aplicar impulso proporcional al tiempo de control (0..3s)
+        const nowTs = performance.now();
+        const controlHeldSec = Math.min(3, Math.max(0, (nowTs - player.ballControlTime) / 1000));
+        const t = controlHeldSec / 3; // 0..1
+        const speed = BALL_RELEASE_MIN + (BALL_RELEASE_MAX - BALL_RELEASE_MIN) * t;
+        // Conservar momento previo del balón en dirección del tiro (proyección positiva)
+        const prevAlongForward = Vector3.Dot(state.ballVelocity, worldForward);
+        const momentumBoost = Math.max(0, prevAlongForward * 0.4); // suma parcial del momentum previo si era hacia delante
+        state.ballVelocity = worldForward.scale(speed + momentumBoost);
+        state.ballLastShotTime = nowTs; // activar ventana sin fricción
+        console.log(`[${currentRoomId}] Velocidad disparo: ${state.ballVelocity.length().toFixed(2)} (hold ${controlHeldSec.toFixed(2)}s)`);
 
         // Empujar pelota ligeramente para evitar recolisión inmediata
         state.ballPosition.addInPlace(state.ballVelocity.normalize().scale(PLAYER_RADIUS + BALL_RADIUS + 0.1));
