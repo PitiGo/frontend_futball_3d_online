@@ -10,6 +10,12 @@ A real-time multiplayer soccer game where two teams of anthropomorphic animals c
 ### Gameplay
 ![alt text](screen2.png)
 
+### Demo
+![Gameplay Demo](video_play.gif)
+
+
+
+
 ## Features
 
 - **Real-time Multiplayer**: Play with friends in fast-paced matches.
