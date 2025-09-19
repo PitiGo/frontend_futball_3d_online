@@ -1,3 +1,5 @@
 deploy.sh
 deploy_with_docker.sh
 get_logs.sh
+.deploy_with_docker.sh
+.get_logs.sh
