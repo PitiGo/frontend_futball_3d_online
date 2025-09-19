@@ -205,8 +205,8 @@ const MobileJoystick = ({ onDirectionChange, onBallControlChange }) => {
                 onTouchCancel={(e) => { e.preventDefault(); onBallControlChange && onBallControlChange(false); }}
                 style={{
                     position: 'fixed',
-                    bottom: '200px',
-                    right: '24px',
+                    bottom: '174px',
+                    left: 'calc(50% - 186px)', // 90 (radio joystick) + 24 (gap) + 72 (ancho botón)
                     width: '72px',
                     height: '72px',
                     borderRadius: '50%',
