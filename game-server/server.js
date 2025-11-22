@@ -58,7 +58,7 @@ const FIELD_WIDTH = 40;
 const FIELD_HEIGHT = 30;
 const BALL_RADIUS = 0.5;
 const PLAYER_RADIUS = 0.5;
-const PLAYER_SPEED = 5; // Velocidad base (unidades por segundo)
+const PLAYER_SPEED = 5; // Velocidad base (unidades por segundo) - Reference: Player moves at 5 u/s
 const GOAL_DEPTH = 7;
 const GOAL_Z_MIN = -GOAL_DEPTH / 2;
 const GOAL_Z_MAX = GOAL_DEPTH / 2;
@@ -67,14 +67,14 @@ const BALL_MASS = 0.45;
 const PLAYER_MASS = 75; // Masa real
 const INV_BALL_MASS = 1 / BALL_MASS;
 const INV_PLAYER_MASS = 1 / PLAYER_MASS;
-const FRICTION = 0.994; // Coeficiente de fricción por tick (ajustado a DT) - Fricción mucho menor para que el balón se deslice más
+const FRICTION = 0.994; // Coeficiente de fricción por tick (ajustado a DT) - Low friction to maintain speed
 const RESTITUTION = 0.6; // Coeficiente de restitución (elasticidad)
 const MAX_PLAYERS_PER_TEAM = 3;
 const GOALS_TO_WIN = 3;
 const BALL_CONTROL_RADIUS = 1.5;
 const BALL_RELEASE_BOOST = 10; // Deprecated (mantener compat)
-const BALL_RELEASE_MIN = 25;    // Velocidad mínima del disparo - Muy alta para disparo potente desde el instante 0
-const BALL_RELEASE_MAX = 45;   // Velocidad máxima del disparo - Cañonazo si cargas los 3 segundos
+const BALL_RELEASE_MIN = 30;    // Minimum shot speed: 30 u/s (6x faster than player) - Quick tap
+const BALL_RELEASE_MAX = 60;   // Maximum shot speed: 60 u/s (12x faster than player) - Full charge
 const PHYSICS_TICK_RATE = 60; // Hz
 const PHYSICS_DT = 1 / PHYSICS_TICK_RATE; // Delta time para física
 
@@ -578,7 +578,9 @@ function updateGamePhysics(roomId, state) {
       const velocityAlongNormal = Vector3.Dot(relativeVelocity, normal);
 
       if (velocityAlongNormal < 0) { // Solo si se acercan
-        const impulseMagnitude = -(1 + RESTITUTION) * velocityAlongNormal / (INV_BALL_MASS + INV_PLAYER_MASS);
+        // Restitution boost multiplier (1.5) - Makes ball "shoot" on contact instead of sticking to foot
+        const restitutionBoost = 1.5;
+        const impulseMagnitude = -(1 + RESTITUTION * restitutionBoost) * velocityAlongNormal / (INV_BALL_MASS + INV_PLAYER_MASS);
         const impulse = normal.scale(impulseMagnitude);
         state.ballVelocity.addInPlace(impulse.scale(INV_BALL_MASS));
         // player.velocity.subtractInPlace(impulse.scale(INV_PLAYER_MASS)); // El jugador se ve menos afectado
@@ -595,7 +597,7 @@ function updateGamePhysics(roomId, state) {
   });
 
   // 4. Limitar Velocidades y Detener Pelota
-  const maxBallSpeedSq = 50 * 50; // Límite de velocidad drásticamente aumentado - Permite velocidades de hasta 50
+  const maxBallSpeedSq = 65 * 65; // Maximum speed limit - Must be greater than BALL_RELEASE_MAX (60)
   if (state.ballVelocity.lengthSquared() > maxBallSpeedSq) {
     state.ballVelocity.normalize().scaleInPlace(Math.sqrt(maxBallSpeedSq));
   }
