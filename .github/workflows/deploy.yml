@@ -22,6 +22,7 @@ jobs:
       - name: 📦 Sincronizar archivos (Rsync)
         run: |
           rsync -avz --delete \
+            -e "ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null" \
             --exclude 'node_modules' \
             --exclude '.git' \
             --exclude '.github' \
