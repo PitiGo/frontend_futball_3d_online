@@ -180,6 +180,7 @@ function resetPlayersPositions(roomId, state) {
     player.rotation.copyFromFloats(0, 0, 0, 1); // Mirando Z positivo
     player.isControllingBall = false;
     player.ballControlTime = 0;
+    player.lastKickTime = 0;
     // Asegurarse de que el estado de movimiento esté inicializado
     if (!state.playerMovements.has(player.id)) {
       state.playerMovements.set(player.id, { moveDirection: Vector3.Zero() });
@@ -572,6 +573,13 @@ function updateGamePhysics(roomId, state) {
     }
     // Colisión Física (si NADIE la controla o si choca con otro jugador)
     else if (distSq < combinedRadiusSq) {
+      // If player shot less than 300ms ago, ignore collision
+      // This allows ball to exit freely without being slowed by player's body
+      const timeSinceKick = performance.now() - (player.lastKickTime || 0);
+      if (timeSinceKick < 300) {
+        return; // Skip collision physics for this player
+      }
+      
       // console.log(`[${roomId}] Colisión física: ${player.name}`); // Log spam
       const normal = vecToBall.normalize();
       const relativeVelocity = state.ballVelocity.subtract(player.velocity);
@@ -711,6 +719,7 @@ io.on('connection', (socket) => {
       ready: false,
       isControllingBall: false,
       ballControlTime: 0,
+      lastKickTime: 0, // To avoid immediate collision after shot
       roomId: roomId // Referencia a su sala
     };
     state.players.set(socket.id, playerData);
@@ -918,20 +927,29 @@ io.on('connection', (socket) => {
           worldForward = worldForward.add(movement).normalize();
         }
 
-        // Aplicar impulso proporcional al tiempo de control (0..3s)
+        // Calculate shot speed (using high values defined earlier)
         const nowTs = performance.now();
         const controlHeldSec = Math.min(3, Math.max(0, (nowTs - player.ballControlTime) / 1000));
         const t = controlHeldSec / 3; // 0..1
-        const speed = BALL_RELEASE_MIN + (BALL_RELEASE_MAX - BALL_RELEASE_MIN) * t;
-        // Conservar momento previo del balón en dirección del tiro (proyección positiva)
-        const prevAlongForward = Vector3.Dot(state.ballVelocity, worldForward);
-        const momentumBoost = Math.max(0, prevAlongForward * 0.8); // Aumentado de 0.4 a 0.8 para dar más peso a la inercia del jugador
-        state.ballVelocity = worldForward.scale(speed + momentumBoost);
-        state.ballLastShotTime = nowTs; // activar ventana sin fricción
-        console.log(`[${currentRoomId}] Velocidad disparo: ${state.ballVelocity.length().toFixed(2)} (hold ${controlHeldSec.toFixed(2)}s)`);
+        
+        // Define high speeds directly to ensure power
+        const MIN_SPEED = 30;
+        const MAX_SPEED = 60;
+        const speed = MIN_SPEED + (MAX_SPEED - MIN_SPEED) * t;
 
-        // Empujar pelota ligeramente para evitar recolisión inmediata
-        state.ballPosition.addInPlace(state.ballVelocity.normalize().scale(PLAYER_RADIUS + BALL_RADIUS + 0.1));
+        // Assign velocity
+        state.ballVelocity = worldForward.scale(speed);
+        state.ballLastShotTime = nowTs;
+
+        // KEY CHANGE: Aggressive separation
+        // Push ball 0.8 units (before 0.1) to ensure it doesn't touch the body
+        const separationDist = PLAYER_RADIUS + BALL_RADIUS + 0.8;
+        state.ballPosition.addInPlace(worldForward.clone().scale(separationDist));
+
+        // KEY CHANGE: Register kick time
+        player.lastKickTime = nowTs;
+
+        console.log(`[${currentRoomId}] SHOT: Speed ${speed.toFixed(1)}`);
       }
     }
     // El estado se emitirá en el siguiente tick de emitGameState
