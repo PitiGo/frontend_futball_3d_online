@@ -67,14 +67,14 @@ const BALL_MASS = 0.45;
 const PLAYER_MASS = 75; // Masa real
 const INV_BALL_MASS = 1 / BALL_MASS;
 const INV_PLAYER_MASS = 1 / PLAYER_MASS;
-const FRICTION = 0.990; // Coeficiente de fricción por tick (ajustado a DT) - Reducido para más distancia
+const FRICTION = 0.994; // Coeficiente de fricción por tick (ajustado a DT) - Fricción mucho menor para que el balón se deslice más
 const RESTITUTION = 0.6; // Coeficiente de restitución (elasticidad)
 const MAX_PLAYERS_PER_TEAM = 3;
 const GOALS_TO_WIN = 3;
 const BALL_CONTROL_RADIUS = 1.5;
 const BALL_RELEASE_BOOST = 10; // Deprecated (mantener compat)
-const BALL_RELEASE_MIN = 18;    // Velocidad mínima del disparo - Aumentado considerablemente
-const BALL_RELEASE_MAX = 35;   // Velocidad máxima del disparo - Casi triple de potencia máxima
+const BALL_RELEASE_MIN = 25;    // Velocidad mínima del disparo - Muy alta para disparo potente desde el instante 0
+const BALL_RELEASE_MAX = 45;   // Velocidad máxima del disparo - Cañonazo si cargas los 3 segundos
 const PHYSICS_TICK_RATE = 60; // Hz
 const PHYSICS_DT = 1 / PHYSICS_TICK_RATE; // Delta time para física
 
@@ -109,7 +109,7 @@ availableSalas.forEach(roomId => {
     ballVelocity: new Vector3(0, 0, 0),
     lastUpdateTime: performance.now(),
     ballLastShotTime: 0,           // Timestamp del último disparo
-    ballFrictionCooldownMs: 600,   // Ventana sin fricción tras disparo - Aumentado para simular vuelo
+    ballFrictionCooldownMs: 800,   // Ventana sin fricción tras disparo - El balón ignorará fricción durante casi 1 segundo
     goalScoredTimeout: null, // ID del temporizador para reiniciar tras gol
     gameOverData: null,     // Datos del resultado final
     gameLoopInterval: null, // ID del intervalo del bucle principal
@@ -595,7 +595,7 @@ function updateGamePhysics(roomId, state) {
   });
 
   // 4. Limitar Velocidades y Detener Pelota
-  const maxBallSpeedSq = 45 * 45; // Aumentar velocidad máxima para tiros fuertes - Permite disparos más potentes
+  const maxBallSpeedSq = 50 * 50; // Límite de velocidad drásticamente aumentado - Permite velocidades de hasta 50
   if (state.ballVelocity.lengthSquared() > maxBallSpeedSq) {
     state.ballVelocity.normalize().scaleInPlace(Math.sqrt(maxBallSpeedSq));
   }
