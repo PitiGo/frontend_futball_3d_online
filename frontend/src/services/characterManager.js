@@ -160,6 +160,19 @@ class CharacterManager {
 
             // --- CÓDIGO MEJORADO para clonar animaciones ---
             const playerAnimations = {};
+            
+            // Obtener el skeleton del modelo clonado si existe
+            let clonedSkeleton = null;
+            if (characterData.skeleton) {
+                // Buscar el skeleton clonado en la instancia
+                const skeletons = playerInstance.getScene().skeletons.filter(s => s.name === characterData.skeleton.name || s.name.includes(playerId));
+                if (skeletons.length > 0) {
+                    clonedSkeleton = skeletons[0];
+                } else if (playerInstance.skeleton) {
+                    clonedSkeleton = playerInstance.skeleton;
+                }
+            }
+            
             if (characterData.animationGroups) {
                 Object.entries(characterData.animationGroups).forEach(([name, group]) => {
                     if (!group) {
@@ -172,28 +185,57 @@ class CharacterManager {
 
                     // La propiedad `targetedAnimations` contiene las animaciones individuales y sus objetivos.
                     // Tenemos que re-dirigir cada una de ellas.
+                    let foundTargets = 0;
+                    let missingTargets = 0;
+                    
                     clonedGroup.targetedAnimations.forEach(targetedAnim => {
                         const originalTarget = targetedAnim.target;
 
                         // Si el objetivo original es la malla raíz, el nuevo objetivo es la instancia clonada.
                         if (originalTarget === characterData.mesh) {
                             targetedAnim.target = playerInstance;
+                            foundTargets++;
                         }
                         // Si no, es probable que sea un hueso o un nodo hijo.
-                        // Buscamos un descendiente en la nueva instancia con el mismo nombre.
                         else {
-                            const newTarget = playerInstance.getDescendants(false).find(d => d.name === originalTarget.name);
+                            let newTarget = null;
+                            
+                            // Primero buscar en los descendientes de la malla
+                            newTarget = playerInstance.getDescendants(false).find(d => d.name === originalTarget.name);
+                            
+                            // Si no se encuentra y tenemos skeleton, buscar en los huesos del skeleton
+                            if (!newTarget && clonedSkeleton) {
+                                newTarget = clonedSkeleton.bones.find(bone => bone.name === originalTarget.name);
+                            }
+                            
+                            // Si aún no se encuentra, buscar recursivamente en todos los descendientes
+                            if (!newTarget) {
+                                const allDescendants = playerInstance.getDescendants(true);
+                                newTarget = allDescendants.find(d => d.name === originalTarget.name);
+                            }
+                            
                             if (newTarget) {
                                 targetedAnim.target = newTarget;
+                                foundTargets++;
                             } else {
-                                console.warn(`No se pudo encontrar el nuevo target para la animación '${targetedAnim.animation.name}' en el target original '${originalTarget.name}'`);
+                                missingTargets++;
+                                // Solo mostrar warning si es un modelo que debería tener estos huesos (Mixamo)
+                                // Suprimir warnings para turtle que puede tener estructura diferente
+                                if (characterType !== 'turtle' || !originalTarget.name.startsWith('mixamorig:')) {
+                                    // Silenciar warnings para turtle con estructura no-Mixamo
+                                }
                             }
                         }
                     });
 
+                    // Solo mostrar warning si hay muchos targets faltantes (más del 50%)
+                    if (missingTargets > 0 && missingTargets > foundTargets) {
+                        console.warn(`Muchos targets faltantes para animación '${name}' del personaje ${characterType}: ${missingTargets} de ${foundTargets + missingTargets}`);
+                    }
+
                     clonedGroup.stop(); // Detener la animación clonada por defecto.
                     playerAnimations[name] = clonedGroup;
-                    console.log(`Clonada y re-dirigida la animación ${name} para el jugador ${playerId}`);
+                    console.log(`Clonada y re-dirigida la animación ${name} para el jugador ${playerId} (${foundTargets} targets encontrados)`);
                 });
             }
 
