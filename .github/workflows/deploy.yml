@@ -1,0 +1,55 @@
+name: Deploy Football3D
+
+on:
+  push:
+    branches:
+      - main  # Se ejecuta cada vez que subes cambios a main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 📥 Descargar código
+        uses: actions/checkout@v4
+
+      - name: 🔐 Configurar SSH
+        run: |
+          mkdir -p ~/.ssh/
+          echo "${{ secrets.VPS_SSH_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -H ${{ secrets.VPS_HOST }} >> ~/.ssh/known_hosts
+
+      - name: 📦 Sincronizar archivos (Rsync)
+        run: |
+          rsync -avz --delete \
+            --exclude 'node_modules' \
+            --exclude '.git' \
+            --exclude '.github' \
+            --exclude 'build' \
+            --exclude '.env.local' \
+            ./ ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}:/opt/football3d/
+
+      - name: 🐳 Reconstruir Docker en VPS
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          script: |
+            cd /opt/football3d
+            
+            echo "🛑 Deteniendo contenedores antiguos..."
+            docker stop football3d_frontend_1 football3d_game-server_1 2>/dev/null || true
+            docker rm football3d_frontend_1 football3d_game-server_1 2>/dev/null || true
+            
+            echo "🏗️ Levantando nuevos contenedores..."
+            # Lógica para detectar versión de Docker
+            if docker compose version >/dev/null 2>&1; then
+                docker compose up --build -d
+            else
+                docker-compose up --build -d
+            fi
+            
+            echo "🧹 Limpiando imágenes basura..."
+            docker image prune -f
+
