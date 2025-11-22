@@ -67,14 +67,14 @@ const BALL_MASS = 0.45;
 const PLAYER_MASS = 75; // Masa real
 const INV_BALL_MASS = 1 / BALL_MASS;
 const INV_PLAYER_MASS = 1 / PLAYER_MASS;
-const FRICTION = 0.985; // Coeficiente de fricción por tick (ajustado a DT)
+const FRICTION = 0.990; // Coeficiente de fricción por tick (ajustado a DT) - Reducido para más distancia
 const RESTITUTION = 0.6; // Coeficiente de restitución (elasticidad)
 const MAX_PLAYERS_PER_TEAM = 3;
 const GOALS_TO_WIN = 3;
 const BALL_CONTROL_RADIUS = 1.5;
 const BALL_RELEASE_BOOST = 10; // Deprecated (mantener compat)
-const BALL_RELEASE_MIN = 8;    // Velocidad mínima del disparo
-const BALL_RELEASE_MAX = 12;   // Velocidad máxima del disparo
+const BALL_RELEASE_MIN = 18;    // Velocidad mínima del disparo - Aumentado considerablemente
+const BALL_RELEASE_MAX = 35;   // Velocidad máxima del disparo - Casi triple de potencia máxima
 const PHYSICS_TICK_RATE = 60; // Hz
 const PHYSICS_DT = 1 / PHYSICS_TICK_RATE; // Delta time para física
 
@@ -109,7 +109,7 @@ availableSalas.forEach(roomId => {
     ballVelocity: new Vector3(0, 0, 0),
     lastUpdateTime: performance.now(),
     ballLastShotTime: 0,           // Timestamp del último disparo
-    ballFrictionCooldownMs: 250,   // Ventana sin fricción tras disparo
+    ballFrictionCooldownMs: 600,   // Ventana sin fricción tras disparo - Aumentado para simular vuelo
     goalScoredTimeout: null, // ID del temporizador para reiniciar tras gol
     gameOverData: null,     // Datos del resultado final
     gameLoopInterval: null, // ID del intervalo del bucle principal
@@ -595,7 +595,7 @@ function updateGamePhysics(roomId, state) {
   });
 
   // 4. Limitar Velocidades y Detener Pelota
-  const maxBallSpeedSq = 28 * 28; // Aumentar velocidad máxima para tiros fuertes
+  const maxBallSpeedSq = 45 * 45; // Aumentar velocidad máxima para tiros fuertes - Permite disparos más potentes
   if (state.ballVelocity.lengthSquared() > maxBallSpeedSq) {
     state.ballVelocity.normalize().scaleInPlace(Math.sqrt(maxBallSpeedSq));
   }
@@ -923,7 +923,7 @@ io.on('connection', (socket) => {
         const speed = BALL_RELEASE_MIN + (BALL_RELEASE_MAX - BALL_RELEASE_MIN) * t;
         // Conservar momento previo del balón en dirección del tiro (proyección positiva)
         const prevAlongForward = Vector3.Dot(state.ballVelocity, worldForward);
-        const momentumBoost = Math.max(0, prevAlongForward * 0.4); // suma parcial del momentum previo si era hacia delante
+        const momentumBoost = Math.max(0, prevAlongForward * 0.8); // Aumentado de 0.4 a 0.8 para dar más peso a la inercia del jugador
         state.ballVelocity = worldForward.scale(speed + momentumBoost);
         state.ballLastShotTime = nowTs; // activar ventana sin fricción
         console.log(`[${currentRoomId}] Velocidad disparo: ${state.ballVelocity.length().toFixed(2)} (hold ${controlHeldSec.toFixed(2)}s)`);
