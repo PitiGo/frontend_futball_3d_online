@@ -1,0 +1,18 @@
+<svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
+  <!-- Fondo -->
+  <rect width="512" height="512" fill="#000000"/>
+  
+  <!-- Diseño MvR estilizado -->
+  <!-- M (Mamíferos) - lado izquierdo -->
+  <path d="M 80 120 L 80 380 L 140 380 L 140 240 L 180 320 L 220 240 L 220 380 L 280 380 L 280 120 L 220 120 L 180 200 L 140 120 Z" fill="#FFFFFF" stroke="#000000" stroke-width="8"/>
+  
+  <!-- v (vs) - centro -->
+  <path d="M 220 200 L 260 320 L 300 200" fill="none" stroke="#FFFFFF" stroke-width="20" stroke-linecap="round" stroke-linejoin="round"/>
+  
+  <!-- R (Reptiles) - lado derecho -->
+  <path d="M 320 120 L 320 380 L 400 380 L 440 340 L 440 280 L 400 240 L 440 200 L 440 140 L 400 120 Z M 400 240 L 380 240 L 380 280 L 400 280 Z" fill="#FFFFFF" stroke="#000000" stroke-width="8"/>
+  
+  <!-- Línea decorativa inferior -->
+  <line x1="100" y1="420" x2="412" y2="420" stroke="#FFFFFF" stroke-width="6" stroke-linecap="round"/>
+</svg>
+

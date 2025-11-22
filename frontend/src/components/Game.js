@@ -704,29 +704,9 @@ const Game = () => {
             backTopBar.material = whiteMat;
             backTopBar.parent = goalRoot;
 
-            // --- REDES (NETS) ---
-            
-            // 1. Red Superior (TECHO) - CORREGIDA
-            // CORRECCIÓN: Intercambiamos width y height. 
-            // Al rotar 90 grados en X (Math.PI/2):
-            // - El 'width' del plano se alinea con el Eje X (Profundidad del mundo) -> goalDepth (2m)
-            // - El 'height' del plano se alinea con el Eje Z (Ancho del mundo) -> goalWidth (7m)
-            const netTop = BABYLON.MeshBuilder.CreatePlane("netTop", {
-                width: goalDepth, 
-                height: goalWidth
-            }, scene);
-            
-            netTop.position = new BABYLON.Vector3(-goalDepth/2, goalHeight, 0);
-            netTop.rotation.x = Math.PI / 2; // Horizontal
-            
-            // Opcional: Rotar textura 90 grados si la rejilla se ve estirada en la dirección incorrecta
-            netTop.rotation.z = Math.PI / 2; 
+            // --- REDES (NETS) - Sin techo ---
 
-            netTop.material = netMaterial;
-            netTop.parent = goalRoot;
-            netTop.physicsImpostor = new BABYLON.PhysicsImpostor(netTop, BABYLON.PhysicsImpostor.BoxImpostor, {mass: 0, restitution: 0.1}, scene);
-
-            // 2. Red Trasera (FONDO)
+            // Red Trasera (FONDO)
             const netBack = BABYLON.MeshBuilder.CreatePlane("netBack", {width: goalWidth, height: goalHeight}, scene);
             netBack.position = new BABYLON.Vector3(-goalDepth, goalHeight/2, 0);
             netBack.rotation.y = -Math.PI / 2; // Mirando hacia el campo
@@ -734,7 +714,7 @@ const Game = () => {
             netBack.parent = goalRoot;
             netBack.physicsImpostor = new BABYLON.PhysicsImpostor(netBack, BABYLON.PhysicsImpostor.BoxImpostor, {mass: 0, restitution: 0.1}, scene);
 
-            // 3. Red Izquierda (LATERAL)
+            // Red Izquierda (LATERAL)
             const netLeft = BABYLON.MeshBuilder.CreatePlane("netLeft", {width: goalDepth, height: goalHeight}, scene);
             netLeft.position = new BABYLON.Vector3(-goalDepth/2, goalHeight/2, -goalWidth/2);
             netLeft.rotation.y = Math.PI; // Mirando hacia adentro (o afuera, da igual con backFaceCulling false)
@@ -742,7 +722,7 @@ const Game = () => {
             netLeft.parent = goalRoot;
             netLeft.physicsImpostor = new BABYLON.PhysicsImpostor(netLeft, BABYLON.PhysicsImpostor.BoxImpostor, {mass: 0, restitution: 0.1}, scene);
 
-            // 4. Red Derecha (LATERAL)
+            // Red Derecha (LATERAL)
             const netRight = BABYLON.MeshBuilder.CreatePlane("netRight", {width: goalDepth, height: goalHeight}, scene);
             netRight.position = new BABYLON.Vector3(-goalDepth/2, goalHeight/2, goalWidth/2);
             // Rotation 0 es correcta aquí por defecto para este lado

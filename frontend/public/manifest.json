@@ -3,12 +3,22 @@
   "name": "Mamíferos vs Reptiles - Fútbol 3D",
   "icons": [
     {
-      "src": "soccerball.png",
+      "src": "favicon-32.png",
+      "sizes": "32x32",
+      "type": "image/png"
+    },
+    {
+      "src": "favicon-64.png",
+      "sizes": "64x64",
+      "type": "image/png"
+    },
+    {
+      "src": "logo192.png",
       "sizes": "192x192",
       "type": "image/png"
     },
     {
-      "src": "soccerball.png",
+      "src": "logo512.png",
       "sizes": "512x512",
       "type": "image/png"
     }
