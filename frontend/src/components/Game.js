@@ -534,69 +534,157 @@ const Game = () => {
         ball.position.y = 0.5;
         ballRef.current = ball;
 
+        // --- INICIO DE CÓDIGO DE PORTERÍA MEJORADA ---
 
+        // Generar textura procedural para la red (reutilizable)
+        const netTexture = new BABYLON.DynamicTexture("netTexture", {width: 512, height: 512}, scene);
+        const netCtx = netTexture.getContext();
+        netCtx.fillStyle = "transparent";
+        netCtx.clearRect(0, 0, 512, 512);
+        netCtx.strokeStyle = "rgba(200, 200, 200, 0.6)";
+        netCtx.lineWidth = 4;
+        netCtx.beginPath();
+        // Dibujar rejilla
+        const step = 32;
+        for (let i = 0; i <= 512; i += step) {
+            netCtx.moveTo(i, 0); netCtx.lineTo(i, 512);
+            netCtx.moveTo(0, i); netCtx.lineTo(512, i);
+        }
+        netCtx.stroke();
+        netTexture.update();
+        netTexture.hasAlpha = true;
 
+        // Material para la red
+        const netMaterial = new BABYLON.StandardMaterial("netMat", scene);
+        netMaterial.diffuseTexture = netTexture;
+        netMaterial.backFaceCulling = false; // Ver la red por ambos lados
+        netMaterial.alpha = 0.6;
+        netMaterial.transparencyMode = BABYLON.Material.MATERIAL_ALPHABLEND;
 
-        // Crear porterías
-        const createGoal = (position) => {
-            const goalFrame = new BABYLON.TransformNode("goalFrame", scene);
-            goalFrame.position = position;
+        const createGoal = (position, isLeftGoal) => {
+            const goalRoot = new BABYLON.TransformNode("goalRoot", scene);
+            goalRoot.position = position;
+            
+            const goalWidth = 7;   // Coincide con el servidor
+            const goalHeight = 2.44; // Altura estándar
+            const goalDepth = 2.0;   // Profundidad de la red
+            const postRadius = 0.12;
 
-            const postMaterial = new BABYLON.StandardMaterial("postMat", scene);
-            postMaterial.diffuseColor = new BABYLON.Color3(1, 1, 1);
+            const whiteMat = new BABYLON.StandardMaterial("postWhite", scene);
+            whiteMat.diffuseColor = new BABYLON.Color3(0.9, 0.9, 0.9);
 
-            // Dimensiones coherentes con el servidor
-            const goalHeight = 3;  // Altura estándar de portería
-            const goalWidth = 7;      // Igual a GOAL_DEPTH del servidor
-            const postDiameter = 0.15;
+            // 1. Postes Verticales
+            const leftPost = BABYLON.MeshBuilder.CreateCylinder("postL", {height: goalHeight, diameter: postRadius * 2}, scene);
+            leftPost.position = new BABYLON.Vector3(0, goalHeight/2, -goalWidth/2);
+            leftPost.material = whiteMat;
+            leftPost.parent = goalRoot;
+            leftPost.physicsImpostor = new BABYLON.PhysicsImpostor(leftPost, BABYLON.PhysicsImpostor.CylinderImpostor, {mass: 0, restitution: 0.5}, scene);
 
-            // Crear los postes verticales
-            const createPost = (offsetZ) => {
-                const post = BABYLON.MeshBuilder.CreateCylinder("post", {
-                    height: goalHeight,
-                    diameter: postDiameter
-                }, scene);
-                post.position = new BABYLON.Vector3(0, goalHeight / 2, offsetZ);
-                post.material = postMaterial;
-                post.parent = goalFrame;
+            const rightPost = BABYLON.MeshBuilder.CreateCylinder("postR", {height: goalHeight, diameter: postRadius * 2}, scene);
+            rightPost.position = new BABYLON.Vector3(0, goalHeight/2, goalWidth/2);
+            rightPost.material = whiteMat;
+            rightPost.parent = goalRoot;
+            rightPost.physicsImpostor = new BABYLON.PhysicsImpostor(rightPost, BABYLON.PhysicsImpostor.CylinderImpostor, {mass: 0, restitution: 0.5}, scene);
 
-                // Añadir física a los postes
-                post.physicsImpostor = new BABYLON.PhysicsImpostor(
-                    post,
-                    BABYLON.PhysicsImpostor.CylinderImpostor,
-                    { mass: 0, restitution: 0.1 },
-                    scene
-                );
-            };
-
-            // Crear postes en las posiciones correctas
-            createPost(-goalWidth / 2);  // Poste izquierdo
-            createPost(goalWidth / 2);   // Poste derecho
-
-            // Travesaño
-            const crossbar = BABYLON.MeshBuilder.CreateCylinder("crossbar", {
-                height: goalWidth,
-                diameter: postDiameter
-            }, scene);
+            // 2. Travesaño
+            const crossbar = BABYLON.MeshBuilder.CreateCylinder("crossbar", {height: goalWidth + (postRadius*2), diameter: postRadius * 2}, scene);
             crossbar.rotation.x = Math.PI / 2;
-            crossbar.position.y = goalHeight;
-            crossbar.position.z = 0;
-            crossbar.material = postMaterial;
-            crossbar.parent = goalFrame;
+            crossbar.position = new BABYLON.Vector3(0, goalHeight, 0);
+            crossbar.material = whiteMat;
+            crossbar.parent = goalRoot;
+            crossbar.physicsImpostor = new BABYLON.PhysicsImpostor(crossbar, BABYLON.PhysicsImpostor.CylinderImpostor, {mass: 0, restitution: 0.5}, scene);
 
-            // Añadir física al travesaño
-            crossbar.physicsImpostor = new BABYLON.PhysicsImpostor(
-                crossbar,
-                BABYLON.PhysicsImpostor.CylinderImpostor,
-                { mass: 0, restitution: 0.1 },
-                scene
-            );
+            // 3. Soportes traseros (Estructura visual)
+            const backSupportL = BABYLON.MeshBuilder.CreateTube("backSupL", {
+                path: [
+                    new BABYLON.Vector3(0, goalHeight, -goalWidth/2), 
+                    new BABYLON.Vector3(-goalDepth, 0, -goalWidth/2)
+                ],
+                radius: postRadius * 0.5
+            }, scene);
+            backSupportL.material = whiteMat;
+            backSupportL.parent = goalRoot;
 
-            return goalFrame;
+            const backSupportR = BABYLON.MeshBuilder.CreateTube("backSupR", {
+                path: [
+                    new BABYLON.Vector3(0, goalHeight, goalWidth/2), 
+                    new BABYLON.Vector3(-goalDepth, 0, goalWidth/2)
+                ],
+                radius: postRadius * 0.5
+            }, scene);
+            backSupportR.material = whiteMat;
+            backSupportR.parent = goalRoot;
+
+            const bottomBar = BABYLON.MeshBuilder.CreateTube("bottomBar", {
+                path: [
+                    new BABYLON.Vector3(-goalDepth, 0, -goalWidth/2), 
+                    new BABYLON.Vector3(-goalDepth, 0, goalWidth/2)
+                ],
+                radius: postRadius * 0.5
+            }, scene);
+            bottomBar.material = whiteMat;
+            bottomBar.parent = goalRoot;
+
+            // 4. La Red (Visual + Física)
+            // Red Trasera
+            const netBack = BABYLON.MeshBuilder.CreatePlane("netBack", {width: goalWidth, height: goalHeight}, scene);
+            netBack.position = new BABYLON.Vector3(-goalDepth, goalHeight/2, 0);
+            netBack.rotation.y = -Math.PI / 2; // Mirando hacia dentro
+            netBack.material = netMaterial;
+            netBack.parent = goalRoot;
+            // Física para que la pelota no traspase la red
+            netBack.physicsImpostor = new BABYLON.PhysicsImpostor(netBack, BABYLON.PhysicsImpostor.BoxImpostor, {mass: 0, restitution: 0.1}, scene);
+
+            // Red Izquierda
+            const netLeft = BABYLON.MeshBuilder.CreatePlane("netLeft", {width: goalDepth, height: goalHeight}, scene);
+            netLeft.position = new BABYLON.Vector3(-goalDepth/2, goalHeight/2, -goalWidth/2);
+            netLeft.rotation.y = Math.PI; 
+            netLeft.material = netMaterial;
+            netLeft.parent = goalRoot;
+            netLeft.physicsImpostor = new BABYLON.PhysicsImpostor(netLeft, BABYLON.PhysicsImpostor.BoxImpostor, {mass: 0, restitution: 0.1}, scene);
+
+            // Red Derecha
+            const netRight = BABYLON.MeshBuilder.CreatePlane("netRight", {width: goalDepth, height: goalHeight}, scene);
+            netRight.position = new BABYLON.Vector3(-goalDepth/2, goalHeight/2, goalWidth/2);
+            // netRight.rotation.y = 0; // Por defecto
+            netRight.material = netMaterial;
+            netRight.parent = goalRoot;
+            netRight.physicsImpostor = new BABYLON.PhysicsImpostor(netRight, BABYLON.PhysicsImpostor.BoxImpostor, {mass: 0, restitution: 0.1}, scene);
+
+            // Red Superior (Techo)
+            const netTop = BABYLON.MeshBuilder.CreatePlane("netTop", {width: goalDepth, height: goalWidth}, scene);
+            netTop.position = new BABYLON.Vector3(-goalDepth/2, goalHeight, 0);
+            netTop.rotation.x = Math.PI / 2;
+            netTop.rotation.z = -Math.PI / 2;
+            netTop.material = netMaterial;
+            netTop.parent = goalRoot;
+            netTop.physicsImpostor = new BABYLON.PhysicsImpostor(netTop, BABYLON.PhysicsImpostor.BoxImpostor, {mass: 0, restitution: 0.1}, scene);
+
+            // Orientar la portería
+            if (isLeftGoal) {
+                // Portería izquierda: está en x=-20, debe abrirse hacia +X.
+                // La estructura creada crece hacia -X (depth).
+                // Rotamos 0 grados, su "espalda" está en -X. Correcto.
+                // Ajuste fino de posición para que la línea de gol esté en el borde del campo
+                goalRoot.rotation.y = 0; 
+            } else {
+                // Portería derecha: está en x=+20, debe abrirse hacia -X.
+                // Rotamos 180 grados.
+                goalRoot.rotation.y = Math.PI;
+            }
+
+            return goalRoot;
         };
 
-        createGoal(new BABYLON.Vector3(-FIELD_WIDTH / 2 + 0.1, 0, 0));  // Portería izquierda
-        createGoal(new BABYLON.Vector3(FIELD_WIDTH / 2 - 0.1, 0, 0));   // Portería derecha
+        // Crear las porterías con la nueva función
+        // Nota: FIELD_WIDTH es 40. 
+        // Portería Izq: Posición en el borde (-20), sin rotación (la red crece hacia afuera, -22)
+        createGoal(new BABYLON.Vector3(-FIELD_WIDTH / 2, 0, 0), true); 
+        
+        // Portería Der: Posición en el borde (+20), rotada 180 (la red crece hacia afuera, +22)
+        createGoal(new BABYLON.Vector3(FIELD_WIDTH / 2, 0, 0), false);
+
+        // --- FIN DE CÓDIGO DE PORTERÍA MEJORADA ---
 
         // UI del marcador
         const advancedTexture = GUI.AdvancedDynamicTexture.CreateFullscreenUI('UI');

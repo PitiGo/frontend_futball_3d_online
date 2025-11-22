@@ -62,6 +62,7 @@ const PLAYER_SPEED = 5; // Velocidad base (unidades por segundo)
 const GOAL_DEPTH = 7;
 const GOAL_Z_MIN = -GOAL_DEPTH / 2;
 const GOAL_Z_MAX = GOAL_DEPTH / 2;
+const GOAL_NET_DEPTH = 2.5; // Nueva constante: Profundidad hacia atrás de la portería
 const BALL_MASS = 0.45;
 const PLAYER_MASS = 75; // Masa real
 const INV_BALL_MASS = 1 / BALL_MASS;
@@ -469,12 +470,39 @@ function updateGamePhysics(roomId, state) {
   // Colisiones con bordes y Goles
   let scored = false;
   if (Math.abs(state.ballPosition.x) >= FIELD_WIDTH / 2 - BALL_RADIUS) {
-    if (state.ballPosition.z >= GOAL_Z_MIN && state.ballPosition.z <= GOAL_Z_MAX && state.ballPosition.y < 3) { // Añadir chequeo de altura
-      const scoringTeam = state.ballPosition.x > 0 ? 'left' : 'right';
-      handleGoal(roomId, state, scoringTeam);
-      scored = true; // Marcar que se anotó para no procesar rebote
+    
+    // Verificar si está dentro del ancho de la portería (Eje Z) y altura (Eje Y)
+    const inGoalWidth = state.ballPosition.z >= GOAL_Z_MIN && state.ballPosition.z <= GOAL_Z_MAX;
+    const inGoalHeight = state.ballPosition.y < 3; // Altura del travesaño
+    
+    if (inGoalWidth && inGoalHeight) {
+      // ESTÁ DENTRO DE LA PORTERÍA
+      
+      // 1. Detectar Gol si no se ha marcado aún
+      // Solo marcamos gol si acaba de cruzar la línea (para evitar spamming)
+      // Un chequeo simple es si el estado actual NO es GOAL_SCORED
+      if (state.currentGameState === gameStates.PLAYING) {
+        const scoringTeam = state.ballPosition.x > 0 ? 'left' : 'right';
+        handleGoal(roomId, state, scoringTeam);
+        scored = true; 
+      }
+
+      // 2. Física de la Red (Nuevo)
+      // Si la pelota llega al fondo de la red (Límite del campo + profundidad red)
+      const goalBackX = (FIELD_WIDTH / 2) + GOAL_NET_DEPTH;
+      
+      if (Math.abs(state.ballPosition.x) >= goalBackX - BALL_RADIUS) {
+        // Rebote contra la red trasera
+        state.ballPosition.x = Math.sign(state.ballPosition.x) * (goalBackX - BALL_RADIUS);
+        state.ballVelocity.x *= -0.2; // Rebote muy amortiguado (la red absorbe energía)
+        state.ballVelocity.z *= 0.9;  // Fricción con la red
+      }
+      
+      // Nota: Podrías añadir rebotes laterales con los postes/red lateral aquí si quisieras ser muy preciso,
+      // pero con el fondo basta para que la pelota no se pierda.
+
     } else {
-      // Rebote pared lateral con conservación de momento: solo invertir componente X, mantener Z
+      // NO ES GOL: Rebote normal contra la pared de fondo (fuera de portería)
       state.ballPosition.x = Math.sign(state.ballPosition.x) * (FIELD_WIDTH / 2 - BALL_RADIUS);
       state.ballVelocity.x *= -RESTITUTION;
     }
