@@ -526,13 +526,55 @@ const Game = () => {
         // Crear el campo
         createProceduralField(scene);
 
-        // Pelota
-        const ball = BABYLON.MeshBuilder.CreateSphere('ball', { diameter: 1 }, scene);
-        const ballMaterial = new BABYLON.StandardMaterial('ballMat', scene);
-        ballMaterial.diffuseTexture = new BABYLON.Texture("soccerball.png", scene);
+        // --- INICIO MEJORA BALÓN ---
+
+        // 1. Geometría de alta definición
+        // Aumentamos 'segments' a 32 para que se vea perfectamente redonda
+        const ball = BABYLON.MeshBuilder.CreateSphere('ball', { 
+            diameter: 1, 
+            segments: 32 
+        }, scene);
+
+        // 2. Material PBR (Physically Based Rendering) para realismo
+        const ballMaterial = new BABYLON.PBRMaterial('ballMat', scene);
+        
+        // Textura base (Tu imagen actual)
+        ballMaterial.albedoTexture = new BABYLON.Texture("soccerball.png", scene);
+        
+        // Propiedades del material (Cuero sintético)
+        ballMaterial.metallic = 0;      // No es metálico
+        ballMaterial.roughness = 0.4;   // Un poco brillante pero no espejo
+        
+        // Ajustes de iluminación
+        ballMaterial.environmentIntensity = 1.0; // Qué tanto refleja el entorno
+        ballMaterial.usePhysicalLightFalloff = false;
+        
+        // Opcional: Si tienes una textura de normales ("bump map") añade esto:
+        // ballMaterial.bumpTexture = new BABYLON.Texture("soccerball_normal.png", scene);
+        // ballMaterial.bumpTexture.level = 0.5; // Intensidad del relieve
+
         ball.material = ballMaterial;
+        
+        // Posición inicial y corrección de pivote
         ball.position.y = 0.5;
+        
+        // Habilitar sombras si hay luz direccional (asegúrate de que tu 'dirLight' tenga shadowGenerator)
+        // const shadowGenerator = new BABYLON.ShadowGenerator(1024, dirLight);
+        // shadowGenerator.addShadowCaster(ball);
+        
         ballRef.current = ball;
+
+        // 3. Efecto de Estela (Trail) para velocidad
+        // Crea un rastro que sigue a la pelota
+        const trail = new BABYLON.TrailMesh("ballTrail", ball, scene, 0.4, 30, true);
+        
+        const trailMat = new BABYLON.StandardMaterial("trailMat", scene);
+        trailMat.emissiveColor = new BABYLON.Color3(1, 1, 1); // Blanco brillante
+        trailMat.diffuseColor = new BABYLON.Color3(1, 1, 1);
+        trailMat.alpha = 0.4; // Semitransparente
+        trail.material = trailMat;
+
+        // --- FIN MEJORA BALÓN ---
 
         // --- INICIO CÓDIGO CORREGIDO PORTERÍA ---
 
@@ -665,14 +707,23 @@ const Game = () => {
             // --- REDES (NETS) ---
             
             // 1. Red Superior (TECHO) - CORREGIDA
-            // width: corresponde al eje X del plano (que será nuestro Z del mundo, ancho portería)
-            // height: corresponde al eje Y del plano (que será nuestro X del mundo, profundidad)
-            const netTop = BABYLON.MeshBuilder.CreatePlane("netTop", {width: goalWidth, height: goalDepth}, scene);
+            // CORRECCIÓN: Intercambiamos width y height. 
+            // Al rotar 90 grados en X (Math.PI/2):
+            // - El 'width' del plano se alinea con el Eje X (Profundidad del mundo) -> goalDepth (2m)
+            // - El 'height' del plano se alinea con el Eje Z (Ancho del mundo) -> goalWidth (7m)
+            const netTop = BABYLON.MeshBuilder.CreatePlane("netTop", {
+                width: goalDepth, 
+                height: goalWidth
+            }, scene);
+            
             netTop.position = new BABYLON.Vector3(-goalDepth/2, goalHeight, 0);
-            netTop.rotation.x = Math.PI / 2; // Rotar 90 grados para que quede horizontal
+            netTop.rotation.x = Math.PI / 2; // Horizontal
+            
+            // Opcional: Rotar textura 90 grados si la rejilla se ve estirada en la dirección incorrecta
+            netTop.rotation.z = Math.PI / 2; 
+
             netTop.material = netMaterial;
             netTop.parent = goalRoot;
-            // Impostor caja fina para que la pelota rebote en el techo
             netTop.physicsImpostor = new BABYLON.PhysicsImpostor(netTop, BABYLON.PhysicsImpostor.BoxImpostor, {mass: 0, restitution: 0.1}, scene);
 
             // 2. Red Trasera (FONDO)
@@ -773,6 +824,19 @@ const Game = () => {
                 // Animar partículas si están visibles
                 if (controlEffectsRef.current.ballHalo.isVisible) {
                     controlEffectsRef.current.animateParticles(ballRef.current.position);
+                }
+
+                // --- LÓGICA DE ESTELA DINÁMICA ---
+                // Obtenemos la estela buscando por nombre (o guardándola en un ref aparte)
+                const trailMesh = scene.getMeshByName("ballTrail");
+                if (trailMesh) {
+                    // Calcular velocidad actual (aproximada por cambio de posición o usando physicsImpostor si existiera en cliente)
+                    // Aquí usaremos un truco visual: si la pelota se mueve, el trail se ve.
+                    // Podemos ajustar la visibilidad según la velocidad si tuviéramos acceso a ella, 
+                    // pero el TrailMesh de Babylon ya hace un buen trabajo desvaneciéndose.
+                    
+                    // Simplemente aseguramos que el material esté correcto
+                    trailMesh.isVisible = true; 
                 }
             }
         });
