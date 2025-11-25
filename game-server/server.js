@@ -309,8 +309,12 @@ function stopGame(roomId, state, reason, finalScore, winningTeam) {
   state.readyState.left.clear();
   state.readyState.right.clear();
 
+  // Emitir gameOver PRIMERO, antes de cualquier otro evento
+  console.log(`[${roomId}] Emitiendo gameOver con datos:`, JSON.stringify(state.gameOverData, null, 2));
   io.to(roomId).emit('gameOver', state.gameOverData);
-  console.log(`[${roomId}] Juego terminado: ${reason}`);
+  // También emitir gameStateInfo con GAME_OVER para sincronizar estado
+  io.to(roomId).emit('gameStateInfo', { currentState: state.currentGameState });
+  console.log(`[${roomId}] Juego terminado: ${reason}. Eventos gameOver y gameStateInfo emitidos.`);
 
   // Programa el reinicio de la sala después de un tiempo (reduced to 5 seconds for faster flow)
   console.log(`[${roomId}] Programando reinicio de sala en 5 segundos...`);

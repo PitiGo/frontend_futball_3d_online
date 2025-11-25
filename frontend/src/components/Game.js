@@ -1247,13 +1247,22 @@ const Game = () => {
         };
 
         const handleGameOver = (gameOverData) => {
-            console.log('>>> Juego terminado:', gameOverData);
+            console.log('>>> [FRONTEND] Juego terminado - Datos recibidos:', gameOverData);
+            console.log('>>> [FRONTEND] gameOverData type:', typeof gameOverData);
+            console.log('>>> [FRONTEND] gameOverData.winningTeam:', gameOverData?.winningTeam);
+            console.log('>>> [FRONTEND] gameOverData.finalScore:', gameOverData?.finalScore);
+            
             setGameStarted(false);
             setGameInProgress(false);
+            
             // Ensure data is saved before showing message
             if (gameOverData) {
+                console.log('>>> [FRONTEND] Guardando gameOverInfo y mostrando mensaje...');
                 setGameOverInfo(gameOverData);
                 setShowingEndMessage(true);
+                console.log('>>> [FRONTEND] Estados actualizados - showingEndMessage debería ser true');
+            } else {
+                console.error('>>> [FRONTEND] ERROR: gameOverData es null o undefined!');
             }
         };
 
@@ -1263,16 +1272,22 @@ const Game = () => {
         };
 
         const handleGameStateInfo = ({ currentState }) => {
-            console.log('>>> Estado del juego:', currentState);
+            console.log('>>> [FRONTEND] Estado del juego recibido:', currentState);
             setGameInProgress(currentState === 'playing');
 
             // If server says we're waiting, hide end game message and reset states
+            // IMPORTANTE: Solo resetear si NO estamos mostrando el mensaje de fin de juego
+            // Esto evita que se resetee antes de que se muestre la pantalla de victoria
             if (currentState === 'waiting') {
-                console.log('>>> Volviendo a sala de espera - reseteando estados...');
-                setShowingEndMessage(false);
-                setGameStarted(false); // Ensure game is marked as not started
-                setScore({ left: 0, right: 0 }); // Reset score visually
-                setGameOverInfo(null); // Clear game over info
+                console.log('>>> [FRONTEND] Estado WAITING recibido. Reseteando estados...');
+                // Usar un pequeño delay para asegurar que gameOver se procese primero
+                setTimeout(() => {
+                    console.log('>>> [FRONTEND] Ejecutando reset de estados después de delay...');
+                    setShowingEndMessage(false);
+                    setGameStarted(false); // Ensure game is marked as not started
+                    setScore({ left: 0, right: 0 }); // Reset score visually
+                    setGameOverInfo(null); // Clear game over info
+                }, 100);
             }
         };
 
