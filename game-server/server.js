@@ -304,9 +304,9 @@ function stopGame(roomId, state, reason, finalScore, winningTeam) {
   io.to(roomId).emit('gameOver', state.gameOverData);
   console.log(`[${roomId}] Juego terminado: ${reason}`);
 
-  // Programa el reinicio de la sala después de un tiempo (ej: 10-15 segundos)
-  console.log(`[${roomId}] Programando reinicio de sala en 15 segundos...`);
-  setTimeout(() => resetFullRoomState(roomId, state), 15000); // 15 segundos
+  // Programa el reinicio de la sala después de un tiempo (reduced to 5 seconds for faster flow)
+  console.log(`[${roomId}] Programando reinicio de sala en 5 segundos...`);
+  setTimeout(() => resetFullRoomState(roomId, state), 5000); // 5 segundos
 }
 
 // Reinicia la sala al estado WAITING, manteniendo jugadores y equipos

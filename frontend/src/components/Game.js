@@ -1254,6 +1254,13 @@ const Game = () => {
         const handleGameStateInfo = ({ currentState }) => {
             console.log('>>> Estado del juego:', currentState);
             setGameInProgress(currentState === 'playing');
+
+            // If server says we're waiting, hide end game message and reset states
+            if (currentState === 'waiting') {
+                setShowingEndMessage(false);
+                setGameStarted(false); // Ensure game is marked as not started
+                setScore({ left: 0, right: 0 }); // Reset score visually
+            }
         };
 
         const handleChatUpdate = (message) => {
