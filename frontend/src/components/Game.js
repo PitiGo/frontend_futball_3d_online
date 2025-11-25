@@ -1250,8 +1250,11 @@ const Game = () => {
             console.log('>>> Juego terminado:', gameOverData);
             setGameStarted(false);
             setGameInProgress(false);
-            setShowingEndMessage(true);
-            setGameOverInfo(gameOverData); // Store winner and final score
+            // Ensure data is saved before showing message
+            if (gameOverData) {
+                setGameOverInfo(gameOverData);
+                setShowingEndMessage(true);
+            }
         };
 
         const handleScoreUpdate = (newScore) => {
@@ -2198,24 +2201,26 @@ const Game = () => {
                     left: 0,
                     width: '100%',
                     height: '100%',
-                    backgroundColor: 'rgba(0, 0, 0, 0.85)',
+                    backgroundColor: 'rgba(0, 0, 0, 0.9)', // Slightly darker
                     display: 'flex',
                     flexDirection: 'column',
                     alignItems: 'center',
                     justifyContent: 'center',
-                    zIndex: 200,
+                    zIndex: 9999, // Extremely high z-index to ensure visibility
                     color: 'white',
-                    animation: 'fadeIn 0.5s ease'
+                    animation: 'fadeIn 0.5s ease',
+                    pointerEvents: 'auto' // Ensure it captures clicks if we add buttons later
                 }}>
                     <h1 style={{ 
                         fontSize: isMobile ? '2rem' : '4rem', 
                         fontWeight: 'bold',
-                        color: gameOverInfo.winningTeam === 'left' ? '#3b82f6' : '#ef4444',
+                        // Use ?. to avoid crashes if winningTeam is missing
+                        color: gameOverInfo?.winningTeam === 'left' ? '#3b82f6' : '#ef4444',
                         textShadow: '0 0 20px rgba(255,255,255,0.2)',
                         textAlign: 'center',
                         marginBottom: '20px'
                     }}>
-                        {gameOverInfo.winningTeam === 'left' 
+                        {gameOverInfo?.winningTeam === 'left' 
                             ? (t('gameUI.mammalTeam') || "MAMMALS WIN!") 
                             : (t('gameUI.reptileTeam') || "REPTILES WIN!")}
                     </h1>
@@ -2226,9 +2231,10 @@ const Game = () => {
                         fontFamily: 'monospace',
                         marginBottom: '30px'
                     }}>
-                        <span style={{ color: '#3b82f6' }}>{gameOverInfo.finalScore.left}</span>
+                        {/* Use ?. and || 0 for safety */}
+                        <span style={{ color: '#3b82f6' }}>{gameOverInfo?.finalScore?.left || 0}</span>
                         <span style={{ margin: '0 20px', color: '#666' }}>-</span>
-                        <span style={{ color: '#ef4444' }}>{gameOverInfo.finalScore.right}</span>
+                        <span style={{ color: '#ef4444' }}>{gameOverInfo?.finalScore?.right || 0}</span>
                     </div>
 
                     <p style={{ fontSize: '1.2rem', color: '#aaa' }}>
