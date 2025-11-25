@@ -136,6 +136,7 @@ const Game = () => {
 
     // Añadir estos estados que faltaban:
     const [gameStarted, setGameStarted] = useState(false);
+    const [gameOverInfo, setGameOverInfo] = useState(null); // Store game over data (winner, final score)
 
     const [readyState, setReadyState] = useState({ left: [], right: [] });
 
@@ -1225,6 +1226,13 @@ const Game = () => {
         const handleGoalScored = ({ team, score }) => {
             console.log(`>>> Gol anotado por equipo ${team}`);
             setScore(score);
+            
+            // Force immediate update of 3D scoreboard (BabylonJS) if it exists
+            if (scoreTextRef.current) {
+                scoreTextRef.current.left.text = (score.left || 0).toString();
+                scoreTextRef.current.right.text = (score.right || 0).toString();
+            }
+            
             // Feedback visual de gol
             setGoalFeedback({ visible: true, team });
             // Sacudir pantalla y confeti
@@ -1243,7 +1251,7 @@ const Game = () => {
             setGameStarted(false);
             setGameInProgress(false);
             setShowingEndMessage(true);
-            // Mostrar mensaje de fin de juego basado en gameOverData
+            setGameOverInfo(gameOverData); // Store winner and final score
         };
 
         const handleScoreUpdate = (newScore) => {
@@ -1260,6 +1268,7 @@ const Game = () => {
                 setShowingEndMessage(false);
                 setGameStarted(false); // Ensure game is marked as not started
                 setScore({ left: 0, right: 0 }); // Reset score visually
+                setGameOverInfo(null); // Clear game over info
             }
         };
 
@@ -2180,6 +2189,57 @@ const Game = () => {
                     </>
                 )
             )}
+
+            {/* Victory Screen */}
+            {showingEndMessage && gameOverInfo && (
+                <div style={{
+                    position: 'fixed',
+                    top: 0,
+                    left: 0,
+                    width: '100%',
+                    height: '100%',
+                    backgroundColor: 'rgba(0, 0, 0, 0.85)',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    zIndex: 200,
+                    color: 'white',
+                    animation: 'fadeIn 0.5s ease'
+                }}>
+                    <h1 style={{ 
+                        fontSize: isMobile ? '2rem' : '4rem', 
+                        fontWeight: 'bold',
+                        color: gameOverInfo.winningTeam === 'left' ? '#3b82f6' : '#ef4444',
+                        textShadow: '0 0 20px rgba(255,255,255,0.2)',
+                        textAlign: 'center',
+                        marginBottom: '20px'
+                    }}>
+                        {gameOverInfo.winningTeam === 'left' 
+                            ? (t('gameUI.mammalTeam') || "MAMMALS WIN!") 
+                            : (t('gameUI.reptileTeam') || "REPTILES WIN!")}
+                    </h1>
+                    
+                    <div style={{
+                        fontSize: isMobile ? '3rem' : '6rem',
+                        fontWeight: 'bold',
+                        fontFamily: 'monospace',
+                        marginBottom: '30px'
+                    }}>
+                        <span style={{ color: '#3b82f6' }}>{gameOverInfo.finalScore.left}</span>
+                        <span style={{ margin: '0 20px', color: '#666' }}>-</span>
+                        <span style={{ color: '#ef4444' }}>{gameOverInfo.finalScore.right}</span>
+                    </div>
+
+                    <p style={{ fontSize: '1.2rem', color: '#aaa' }}>
+                        {t('gameUI.victory') || "VICTORY!"}
+                    </p>
+                    
+                    <p style={{ marginTop: '20px', fontSize: '0.9rem', opacity: 0.7 }}>
+                        Volviendo a la sala en unos segundos...
+                    </p>
+                </div>
+            )}
         </div>
     );
 };
@@ -2200,6 +2260,7 @@ if (typeof document !== 'undefined' && !document.getElementById('goal-animations
         80% { transform: translate(-4px, 3px) }
         100% { transform: translate(0, 0) }
       }
+      @keyframes fadeIn { from { opacity: 0 } to { opacity: 1 } }
     `;
     document.head.appendChild(style);
 }
