@@ -21,6 +21,7 @@ function parseEnvList(name, fallbackList) {
 const allowedOrigins = parseEnvList('ALLOWED_ORIGINS', [
   "https://football-online-3d.dantecollazzi.com",
   "https://www.dantecollazzi.com",
+  "https://dantecollazzi.com", // Domain without www
   "http://localhost:3000"
 ]);
 
