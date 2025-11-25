@@ -1268,6 +1268,7 @@ const Game = () => {
 
             // If server says we're waiting, hide end game message and reset states
             if (currentState === 'waiting') {
+                console.log('>>> Volviendo a sala de espera - reseteando estados...');
                 setShowingEndMessage(false);
                 setGameStarted(false); // Ensure game is marked as not started
                 setScore({ left: 0, right: 0 }); // Reset score visually

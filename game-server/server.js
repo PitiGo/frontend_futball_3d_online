@@ -112,6 +112,7 @@ availableSalas.forEach(roomId => {
     ballLastShotTime: 0,           // Timestamp del último disparo
     ballFrictionCooldownMs: 800,   // Ventana sin fricción tras disparo - El balón ignorará fricción durante casi 1 segundo
     goalScoredTimeout: null, // ID del temporizador para reiniciar tras gol
+    gameOverTimeout: null,   // ID del temporizador para reiniciar tras game over
     gameOverData: null,     // Datos del resultado final
     gameLoopInterval: null, // ID del intervalo del bucle principal
     playerMovements: new Map() // Mapa de socket.id -> { moveDirection: Vector3 }
@@ -290,6 +291,12 @@ function stopGame(roomId, state, reason, finalScore, winningTeam) {
     clearTimeout(state.goalScoredTimeout);
     state.goalScoredTimeout = null;
   }
+  
+  // Limpiar timeout anterior de game over si existe
+  if (state.gameOverTimeout) {
+    clearTimeout(state.gameOverTimeout);
+    state.gameOverTimeout = null;
+  }
 
   state.currentGameState = gameStates.GAME_OVER;
   state.gameOverData = { reason, finalScore, winningTeam, goalsToWin: GOALS_TO_WIN };
@@ -307,7 +314,11 @@ function stopGame(roomId, state, reason, finalScore, winningTeam) {
 
   // Programa el reinicio de la sala después de un tiempo (reduced to 5 seconds for faster flow)
   console.log(`[${roomId}] Programando reinicio de sala en 5 segundos...`);
-  setTimeout(() => resetFullRoomState(roomId, state), 5000); // 5 segundos
+  state.gameOverTimeout = setTimeout(() => {
+    console.log(`[${roomId}] Ejecutando reinicio de sala...`);
+    state.gameOverTimeout = null;
+    resetFullRoomState(roomId, state);
+  }, 5000); // 5 segundos
 }
 
 // Reinicia la sala al estado WAITING, manteniendo jugadores y equipos
@@ -322,6 +333,12 @@ function resetFullRoomState(roomId, state) {
   if (state.goalScoredTimeout) {
     clearTimeout(state.goalScoredTimeout);
     state.goalScoredTimeout = null;
+  }
+  
+  // Limpiar timeout de game over si existe
+  if (state.gameOverTimeout) {
+    clearTimeout(state.gameOverTimeout);
+    state.gameOverTimeout = null;
   }
 
   state.currentGameState = gameStates.WAITING;
@@ -348,7 +365,9 @@ function resetFullRoomState(roomId, state) {
   io.to(roomId).emit('teamUpdate', status.teams);
   io.to(roomId).emit('readyUpdate', getReadyPayload(state)); // Enviar estado 'listo' vacío
   io.to(roomId).emit('gameStateInfo', { currentState: state.currentGameState });
+  io.to(roomId).emit('scoreUpdate', state.score); // Enviar score actualizado
   emitGameState(roomId, state); // Enviar estado inicial de posiciones
+  console.log(`[${roomId}] Estado de sala reiniciado a WAITING. Eventos emitidos.`);
 }
 
 function handleGoal(roomId, state, scoringTeam) {
