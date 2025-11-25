@@ -927,14 +927,14 @@ io.on('connection', (socket) => {
           worldForward = worldForward.add(movement).normalize();
         }
 
-        // Calculate shot speed (using high values defined earlier)
+        // Calculate shot speed
         const nowTs = performance.now();
         const controlHeldSec = Math.min(3, Math.max(0, (nowTs - player.ballControlTime) / 1000));
         const t = controlHeldSec / 3; // 0..1
         
-        // Define high speeds directly to ensure power
-        const MIN_SPEED = 30;
-        const MAX_SPEED = 60;
+        // Reduced shot speeds for better control
+        const MIN_SPEED = 15; // Minimum speed (quick tap) - reduced from 30
+        const MAX_SPEED = 35; // Maximum speed (full 3s charge) - reduced from 60
         const speed = MIN_SPEED + (MAX_SPEED - MIN_SPEED) * t;
 
         // Assign velocity
