@@ -415,102 +415,180 @@ const Game = () => {
             const ground = BABYLON.MeshBuilder.CreateGround('ground', {
                 width: FIELD_WIDTH,
                 height: FIELD_HEIGHT,
-                subdivisions: 64 // Mantener misma calidad en móvil
+                subdivisions: 64
             }, scene);
 
-            // Generar textura de césped procedural
-            const grassTexture = new BABYLON.DynamicTexture("proceduralGrass", 1024, scene);
+            // Generar textura de césped procedural con franjas profesionales
+            const grassTexture = new BABYLON.DynamicTexture("proceduralGrass", 2048, scene);
             const ctx = grassTexture.getContext();
+            const texSize = grassTexture.getSize().width;
 
-            // Color base del césped
-            ctx.fillStyle = "#2a6321";
-            ctx.fillRect(0, 0, grassTexture.getSize().width, grassTexture.getSize().height);
+            // Dibujar franjas de césped alternadas (como campos profesionales)
+            const stripeCount = 12;
+            const stripeWidth = texSize / stripeCount;
+            
+            for (let i = 0; i < stripeCount; i++) {
+                // Alternar entre verde claro y verde oscuro
+                const baseColor = i % 2 === 0 ? "#2d8a2e" : "#236b24";
+                ctx.fillStyle = baseColor;
+                ctx.fillRect(i * stripeWidth, 0, stripeWidth, texSize);
+            }
 
-            // Paleta de colores para variaciones
-            const colors = [
-                "#2a6321", // Verde base
-                "#225219", // Verde oscuro
-                "#337a27", // Verde claro
-                "#1e4a16", // Verde más oscuro
-                "#2d6d23"  // Verde medio
-            ];
-
-            // Generar variaciones de color
-            for (let i = 0; i < 2000; i++) {
-                const x = Math.random() * grassTexture.getSize().width;
-                const y = Math.random() * grassTexture.getSize().height;
-                const radius = 5 + Math.random() * 15;
-                const color = colors[Math.floor(Math.random() * colors.length)];
-
+            // Añadir variaciones naturales al césped
+            ctx.globalAlpha = 0.15;
+            for (let i = 0; i < 3000; i++) {
+                const x = Math.random() * texSize;
+                const y = Math.random() * texSize;
+                const radius = 3 + Math.random() * 12;
+                const colorVar = Math.random() > 0.5 ? "#1e5a1f" : "#3a9e3b";
                 ctx.beginPath();
-                ctx.fillStyle = color;
-                ctx.globalAlpha = 0.3 + Math.random() * 0.4;
+                ctx.fillStyle = colorVar;
                 ctx.arc(x, y, radius, 0, Math.PI * 2);
                 ctx.fill();
             }
 
-            // Añadir líneas de corte
-            const linesCount = 20;
-            for (let i = 0; i < linesCount; i++) {
-                const y = (i / linesCount) * grassTexture.getSize().height;
+            // Añadir textura de briznas de hierba sutiles
+            ctx.globalAlpha = 0.08;
+            ctx.strokeStyle = "#1a4d1b";
+            for (let i = 0; i < 5000; i++) {
+                const x = Math.random() * texSize;
+                const y = Math.random() * texSize;
+                const length = 3 + Math.random() * 8;
                 ctx.beginPath();
-                ctx.strokeStyle = i % 2 === 0 ? "#2d7023" : "#225219";
-                ctx.lineWidth = 10;
-                ctx.globalAlpha = 0.2;
-                ctx.moveTo(0, y);
-                ctx.lineTo(grassTexture.getSize().width, y);
+                ctx.moveTo(x, y);
+                ctx.lineTo(x + (Math.random() - 0.5) * 3, y + length);
                 ctx.stroke();
             }
 
-            // Actualizar y configurar la textura
+            ctx.globalAlpha = 1.0;
             grassTexture.update();
             grassTexture.wrapU = grassTexture.wrapV = BABYLON.Texture.WRAP_ADDRESSMODE;
 
-            // Crear y configurar el material
+            // Material del césped mejorado
             const grassMaterial = new BABYLON.StandardMaterial("grassMat", scene);
             grassMaterial.diffuseTexture = grassTexture;
-            grassMaterial.specularColor = new BABYLON.Color3(0.1, 0.1, 0.1);
-            grassMaterial.diffuseTexture.uScale = 5;
-            grassMaterial.diffuseTexture.vScale = 4;
-
+            grassMaterial.specularColor = new BABYLON.Color3(0.05, 0.08, 0.05);
+            grassMaterial.diffuseTexture.uScale = 1;
+            grassMaterial.diffuseTexture.vScale = 1;
             ground.material = grassMaterial;
 
-            // Añadir líneas del campo
-            const linesTexture = new BABYLON.DynamicTexture("linesTexture",
-                { width: 1024, height: 1024 }, scene);
+            // === LÍNEAS DEL CAMPO PROFESIONALES ===
+            const linesTexture = new BABYLON.DynamicTexture("linesTexture", 2048, scene);
             const linesCtx = linesTexture.getContext();
+            const lSize = linesTexture.getSize().width;
+            
+            // Proporciones del campo (escaladas a la textura)
+            const margin = 30;  // Margen del borde
+            const fieldW = lSize - margin * 2;
+            const fieldH = lSize - margin * 2;
+            const centerX = lSize / 2;
+            const centerY = lSize / 2;
+            
+            // Proporciones reales de fútbol (ajustadas al campo)
+            const penaltyAreaWidth = fieldW * 0.16;   // Ancho del área grande
+            const penaltyAreaHeight = fieldH * 0.44;  // Alto del área grande
+            const goalAreaWidth = fieldW * 0.055;     // Ancho del área pequeña
+            const goalAreaHeight = fieldH * 0.19;     // Alto del área pequeña
+            const penaltySpotDist = fieldW * 0.11;    // Distancia punto penalti
+            const centerCircleRadius = fieldH * 0.16; // Radio círculo central
+            const cornerRadius = fieldH * 0.033;      // Radio arco córner
+            const penaltyArcRadius = fieldH * 0.16;   // Radio arco del área
 
-            // Dibujar líneas del campo
+            // Configurar estilo de líneas
             linesCtx.strokeStyle = "white";
-            linesCtx.lineWidth = 5;
+            linesCtx.fillStyle = "white";
+            linesCtx.lineWidth = 6;
+            linesCtx.lineCap = "round";
+            linesCtx.lineJoin = "round";
 
-            // Líneas exteriores
-            linesCtx.strokeRect(10, 10, linesTexture.getSize().width - 20,
-                linesTexture.getSize().height - 20);
+            // 1. Líneas exteriores del campo
+            linesCtx.strokeRect(margin, margin, fieldW, fieldH);
 
-            // Línea central
-            const center = linesTexture.getSize().width / 2;
+            // 2. Línea central vertical
             linesCtx.beginPath();
-            linesCtx.moveTo(center, 10);
-            linesCtx.lineTo(center, linesTexture.getSize().height - 10);
+            linesCtx.moveTo(centerX, margin);
+            linesCtx.lineTo(centerX, lSize - margin);
             linesCtx.stroke();
 
-            // Círculo central
+            // 3. Círculo central
             linesCtx.beginPath();
-            linesCtx.arc(center, center, linesTexture.getSize().width / 10,
-                0, Math.PI * 2);
+            linesCtx.arc(centerX, centerY, centerCircleRadius, 0, Math.PI * 2);
+            linesCtx.stroke();
+
+            // 4. Punto central
+            linesCtx.beginPath();
+            linesCtx.arc(centerX, centerY, 8, 0, Math.PI * 2);
+            linesCtx.fill();
+
+            // 5. Área de penalti IZQUIERDA
+            const leftPenaltyX = margin;
+            const leftPenaltyY = centerY - penaltyAreaHeight / 2;
+            linesCtx.strokeRect(leftPenaltyX, leftPenaltyY, penaltyAreaWidth, penaltyAreaHeight);
+
+            // 6. Área pequeña IZQUIERDA
+            const leftGoalY = centerY - goalAreaHeight / 2;
+            linesCtx.strokeRect(leftPenaltyX, leftGoalY, goalAreaWidth, goalAreaHeight);
+
+            // 7. Punto de penalti IZQUIERDO
+            linesCtx.beginPath();
+            linesCtx.arc(margin + penaltySpotDist, centerY, 6, 0, Math.PI * 2);
+            linesCtx.fill();
+
+            // 8. Semicírculo del área IZQUIERDA
+            linesCtx.beginPath();
+            linesCtx.arc(margin + penaltySpotDist, centerY, penaltyArcRadius, -Math.PI * 0.35, Math.PI * 0.35);
+            linesCtx.stroke();
+
+            // 9. Área de penalti DERECHA
+            const rightPenaltyX = lSize - margin - penaltyAreaWidth;
+            linesCtx.strokeRect(rightPenaltyX, leftPenaltyY, penaltyAreaWidth, penaltyAreaHeight);
+
+            // 10. Área pequeña DERECHA
+            const rightGoalX = lSize - margin - goalAreaWidth;
+            linesCtx.strokeRect(rightGoalX, leftGoalY, goalAreaWidth, goalAreaHeight);
+
+            // 11. Punto de penalti DERECHO
+            linesCtx.beginPath();
+            linesCtx.arc(lSize - margin - penaltySpotDist, centerY, 6, 0, Math.PI * 2);
+            linesCtx.fill();
+
+            // 12. Semicírculo del área DERECHA
+            linesCtx.beginPath();
+            linesCtx.arc(lSize - margin - penaltySpotDist, centerY, penaltyArcRadius, Math.PI * 0.65, Math.PI * 1.35);
+            linesCtx.stroke();
+
+            // 13. Arcos de esquina (córners)
+            // Esquina superior izquierda
+            linesCtx.beginPath();
+            linesCtx.arc(margin, margin, cornerRadius, 0, Math.PI * 0.5);
+            linesCtx.stroke();
+            // Esquina superior derecha
+            linesCtx.beginPath();
+            linesCtx.arc(lSize - margin, margin, cornerRadius, Math.PI * 0.5, Math.PI);
+            linesCtx.stroke();
+            // Esquina inferior izquierda
+            linesCtx.beginPath();
+            linesCtx.arc(margin, lSize - margin, cornerRadius, Math.PI * 1.5, Math.PI * 2);
+            linesCtx.stroke();
+            // Esquina inferior derecha
+            linesCtx.beginPath();
+            linesCtx.arc(lSize - margin, lSize - margin, cornerRadius, Math.PI, Math.PI * 1.5);
             linesCtx.stroke();
 
             linesTexture.update();
+            linesTexture.hasAlpha = true;
 
+            // Plano para las líneas
             const lines = BABYLON.MeshBuilder.CreatePlane("lines", { size: 1 }, scene);
             const linesMaterial = new BABYLON.StandardMaterial("linesMat", scene);
             linesMaterial.diffuseTexture = linesTexture;
-            linesMaterial.diffuseColor = new BABYLON.Color3(1, 1, 1);
-            linesMaterial.alpha = 0.7;
+            linesMaterial.opacityTexture = linesTexture;
+            linesMaterial.emissiveColor = new BABYLON.Color3(0.9, 0.9, 0.9);
+            linesMaterial.useAlphaFromDiffuseTexture = true;
+            linesMaterial.backFaceCulling = false;
             lines.material = linesMaterial;
             lines.rotation.x = Math.PI / 2;
-            lines.position.y = 0.01;
+            lines.position.y = 0.02;
             lines.scaling = new BABYLON.Vector3(FIELD_WIDTH, FIELD_HEIGHT, 1);
 
             // Configurar física
