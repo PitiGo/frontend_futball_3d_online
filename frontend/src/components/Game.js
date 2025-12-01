@@ -149,10 +149,6 @@ const Game = () => {
 
     // Añadir detección de dispositivo móvil
     const [isMobile, setIsMobile] = useState(false);
-    
-    // Viewport con relación de aspecto fija (campo de fútbol ~16:10)
-    const TARGET_ASPECT_RATIO = 16 / 10; // Relación de aspecto del campo
-    const [viewport, setViewport] = useState({ width: '100%', height: '100%', top: 0, left: 0 });
 
 
     const [chatExpanded, setChatExpanded] = useState(true)
@@ -1800,46 +1796,14 @@ const Game = () => {
     }, [roomId, createScene, setupSocket, updateGameState, hasJoined, playerName, startConfetti]);
 
     useEffect(() => {
-        const updateViewport = () => {
-            const windowWidth = window.innerWidth;
-            const windowHeight = window.innerHeight;
-            const windowAspect = windowWidth / windowHeight;
-            
-            setIsMobile(windowWidth <= 768);
-            
-            let canvasWidth, canvasHeight, offsetTop, offsetLeft;
-            
-            if (windowAspect > TARGET_ASPECT_RATIO) {
-                // Ventana más ancha que el campo → barras a los lados (pillarbox)
-                canvasHeight = windowHeight;
-                canvasWidth = windowHeight * TARGET_ASPECT_RATIO;
-                offsetTop = 0;
-                offsetLeft = (windowWidth - canvasWidth) / 2;
-            } else {
-                // Ventana más alta que el campo → barras arriba/abajo (letterbox)
-                canvasWidth = windowWidth;
-                canvasHeight = windowWidth / TARGET_ASPECT_RATIO;
-                offsetLeft = 0;
-                offsetTop = (windowHeight - canvasHeight) / 2;
-            }
-            
-            setViewport({
-                width: `${canvasWidth}px`,
-                height: `${canvasHeight}px`,
-                top: offsetTop,
-                left: offsetLeft
-            });
-            
-            // Forzar resize del engine de Babylon
-            if (engineRef.current) {
-                engineRef.current.resize();
-            }
+        const checkMobile = () => {
+            setIsMobile(window.innerWidth <= 768);
         };
 
-        updateViewport();
-        window.addEventListener('resize', updateViewport);
-        return () => window.removeEventListener('resize', updateViewport);
-    }, [TARGET_ASPECT_RATIO]);
+        checkMobile();
+        window.addEventListener('resize', checkMobile);
+        return () => window.removeEventListener('resize', checkMobile);
+    }, []);
 
     // Añadir también un useEffect para manejar la visibilidad de la página
     useEffect(() => {
@@ -2012,7 +1976,6 @@ const Game = () => {
             width: '100%',
             height: '100%',
             overflow: 'hidden',
-            backgroundColor: '#111', // Fondo oscuro para barras de letterbox
             WebkitTapHighlightColor: 'transparent',
             WebkitTouchCallout: 'none',
             userSelect: 'none',
@@ -2065,11 +2028,8 @@ const Game = () => {
             <canvas
                 ref={canvasRef}
                 style={{
-                    position: 'absolute',
-                    width: viewport.width,
-                    height: viewport.height,
-                    top: viewport.top,
-                    left: viewport.left,
+                    width: '100%',
+                    height: '100%',
                     display: 'block',
                     touchAction: 'none'
                 }}
