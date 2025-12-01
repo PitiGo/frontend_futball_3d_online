@@ -68,7 +68,6 @@ const Game = () => {
     // Sistema de clima
     const [currentWeather, setCurrentWeather] = useState('sunny'); // 'sunny', 'rainy', 'snowy'
     const weatherParticlesRef = useRef(null);
-    const weatherLightRef = useRef(null);
 
     const startConfetti = useCallback((team) => {
         const canvas = confettiCanvasRef.current;
@@ -731,6 +730,37 @@ const Game = () => {
         createProceduralField(scene);
 
         // === SISTEMA DE CLIMA ===
+        // Crear textura base para partículas (círculo blanco difuso)
+        const createParticleTexture = (name, size) => {
+            const texture = new BABYLON.DynamicTexture(name, size, scene, true);
+            const ctx = texture.getContext();
+            
+            // Fondo transparente
+            ctx.clearRect(0, 0, size, size);
+            
+            // Círculo con gradiente radial
+            const centerX = size / 2;
+            const centerY = size / 2;
+            const radius = size / 2 - 2;
+            
+            const gradient = ctx.createRadialGradient(centerX, centerY, 0, centerX, centerY, radius);
+            gradient.addColorStop(0, 'rgba(255, 255, 255, 1)');
+            gradient.addColorStop(0.5, 'rgba(255, 255, 255, 0.8)');
+            gradient.addColorStop(1, 'rgba(255, 255, 255, 0)');
+            
+            ctx.fillStyle = gradient;
+            ctx.beginPath();
+            ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
+            ctx.fill();
+            
+            texture.update();
+            texture.hasAlpha = true;
+            return texture;
+        };
+        
+        // Textura compartida para todas las partículas
+        const weatherParticleTexture = createParticleTexture("weatherParticle", 64);
+        
         const createWeatherSystem = (scene, weatherType) => {
             // Limpiar sistema anterior si existe
             if (weatherParticlesRef.current) {
@@ -738,129 +768,102 @@ const Game = () => {
                 weatherParticlesRef.current = null;
             }
             
+            // Quitar niebla siempre primero
+            scene.fogMode = BABYLON.Scene.FOGMODE_NONE;
+            
             if (weatherType === 'sunny') {
-                // Restaurar iluminación soleada
-                light.intensity = 0.8;
-                light.groundColor = new BABYLON.Color3(0.4, 0.5, 0.3);
-                dirLight.intensity = 0.6;
-                dirLight.diffuse = new BABYLON.Color3(1, 0.98, 0.9);
-                scene.fogMode = BABYLON.Scene.FOGMODE_NONE;
+                // Sin partículas para día soleado
                 return null;
             }
             
-            // Crear emisor de partículas en la parte superior
-            const particleSystem = new BABYLON.ParticleSystem("weather", 3000, scene);
+            // Crear sistema de partículas
+            const particleSystem = new BABYLON.ParticleSystem("weather", 5000, scene);
+            particleSystem.particleTexture = weatherParticleTexture;
             
-            // Emisor tipo caja sobre el campo
-            const emitter = new BABYLON.BoxParticleEmitter();
-            emitter.minEmitBox = new BABYLON.Vector3(-50, 40, -50);
-            emitter.maxEmitBox = new BABYLON.Vector3(50, 45, 50);
-            particleSystem.particleEmitterType = emitter;
-            particleSystem.emitter = new BABYLON.Vector3(0, 42, 0);
+            // Emisor: caja grande sobre el campo (más cerca de la cámara)
+            particleSystem.emitter = new BABYLON.Vector3(0, 25, 0);
+            particleSystem.minEmitBox = new BABYLON.Vector3(-30, 0, -20);
+            particleSystem.maxEmitBox = new BABYLON.Vector3(30, 5, 20);
             
             if (weatherType === 'rainy') {
                 // === LLUVIA ===
-                // Textura de gota de lluvia procedural
-                const rainTexture = new BABYLON.DynamicTexture("rainDrop", 64, scene);
-                const rainCtx = rainTexture.getContext();
-                rainCtx.clearRect(0, 0, 64, 64);
-                const gradient = rainCtx.createLinearGradient(32, 0, 32, 64);
-                gradient.addColorStop(0, "rgba(200, 220, 255, 0)");
-                gradient.addColorStop(0.3, "rgba(200, 220, 255, 0.8)");
-                gradient.addColorStop(1, "rgba(200, 220, 255, 0.3)");
-                rainCtx.fillStyle = gradient;
-                rainCtx.fillRect(30, 0, 4, 64);
-                rainTexture.update();
+                particleSystem.emitRate = 1500;
+                particleSystem.minLifeTime = 0.3;
+                particleSystem.maxLifeTime = 0.6;
                 
-                particleSystem.particleTexture = rainTexture;
-                particleSystem.emitRate = 2000;
-                particleSystem.minLifeTime = 0.5;
-                particleSystem.maxLifeTime = 1.0;
-                particleSystem.minSize = 0.05;
-                particleSystem.maxSize = 0.15;
-                particleSystem.minEmitPower = 30;
-                particleSystem.maxEmitPower = 40;
-                particleSystem.direction1 = new BABYLON.Vector3(-0.2, -1, -0.2);
-                particleSystem.direction2 = new BABYLON.Vector3(0.2, -1, 0.2);
-                particleSystem.gravity = new BABYLON.Vector3(0, -30, 0);
-                particleSystem.color1 = new BABYLON.Color4(0.7, 0.8, 1, 0.6);
-                particleSystem.color2 = new BABYLON.Color4(0.6, 0.7, 0.9, 0.4);
-                particleSystem.colorDead = new BABYLON.Color4(0.5, 0.6, 0.8, 0);
+                // Tamaño de gotas (alargadas verticalmente)
+                particleSystem.minSize = 0.1;
+                particleSystem.maxSize = 0.2;
+                particleSystem.minScaleX = 0.3;
+                particleSystem.maxScaleX = 0.5;
+                particleSystem.minScaleY = 2;
+                particleSystem.maxScaleY = 4;
+                
+                // Velocidad y dirección (caída rápida)
+                particleSystem.minEmitPower = 40;
+                particleSystem.maxEmitPower = 60;
+                particleSystem.direction1 = new BABYLON.Vector3(-0.1, -1, 0);
+                particleSystem.direction2 = new BABYLON.Vector3(0.1, -1, 0);
+                particleSystem.gravity = new BABYLON.Vector3(0, -50, 0);
+                
+                // Colores azulados transparentes
+                particleSystem.color1 = new BABYLON.Color4(0.6, 0.7, 1, 0.4);
+                particleSystem.color2 = new BABYLON.Color4(0.5, 0.6, 0.9, 0.3);
+                particleSystem.colorDead = new BABYLON.Color4(0.4, 0.5, 0.8, 0);
+                
                 particleSystem.blendMode = BABYLON.ParticleSystem.BLENDMODE_ADD;
                 
-                // Ajustar iluminación para lluvia (más oscuro, grisáceo)
-                light.intensity = 0.5;
-                light.groundColor = new BABYLON.Color3(0.3, 0.35, 0.4);
-                dirLight.intensity = 0.3;
-                dirLight.diffuse = new BABYLON.Color3(0.8, 0.85, 0.9);
-                
-                // Añadir niebla ligera
+                // Niebla ligera para atmósfera lluviosa
                 scene.fogMode = BABYLON.Scene.FOGMODE_EXP;
-                scene.fogDensity = 0.01;
-                scene.fogColor = new BABYLON.Color3(0.6, 0.65, 0.7);
+                scene.fogDensity = 0.008;
+                scene.fogColor = new BABYLON.Color3(0.5, 0.55, 0.6);
                 
             } else if (weatherType === 'snowy') {
                 // === NIEVE ===
-                // Textura de copo de nieve procedural
-                const snowTexture = new BABYLON.DynamicTexture("snowFlake", 64, scene);
-                const snowCtx = snowTexture.getContext();
-                snowCtx.clearRect(0, 0, 64, 64);
+                particleSystem.emitRate = 400;
+                particleSystem.minLifeTime = 4;
+                particleSystem.maxLifeTime = 8;
                 
-                // Dibujar copo de nieve
-                snowCtx.fillStyle = "rgba(255, 255, 255, 0.9)";
-                snowCtx.beginPath();
-                snowCtx.arc(32, 32, 20, 0, Math.PI * 2);
-                snowCtx.fill();
+                // Tamaño de copos (más grandes y visibles)
+                particleSystem.minSize = 0.15;
+                particleSystem.maxSize = 0.4;
                 
-                // Añadir brillo en el centro
-                const snowGradient = snowCtx.createRadialGradient(32, 32, 0, 32, 32, 20);
-                snowGradient.addColorStop(0, "rgba(255, 255, 255, 1)");
-                snowGradient.addColorStop(1, "rgba(255, 255, 255, 0)");
-                snowCtx.fillStyle = snowGradient;
-                snowCtx.fill();
-                snowTexture.update();
+                // Velocidad y dirección (caída lenta con viento)
+                particleSystem.minEmitPower = 2;
+                particleSystem.maxEmitPower = 5;
+                particleSystem.direction1 = new BABYLON.Vector3(-0.3, -1, -0.2);
+                particleSystem.direction2 = new BABYLON.Vector3(0.3, -1, 0.2);
+                particleSystem.gravity = new BABYLON.Vector3(0.5, -1, 0);
                 
-                particleSystem.particleTexture = snowTexture;
-                particleSystem.emitRate = 800;
-                particleSystem.minLifeTime = 3;
-                particleSystem.maxLifeTime = 6;
-                particleSystem.minSize = 0.1;
-                particleSystem.maxSize = 0.3;
-                particleSystem.minEmitPower = 1;
-                particleSystem.maxEmitPower = 3;
-                particleSystem.direction1 = new BABYLON.Vector3(-0.5, -1, -0.5);
-                particleSystem.direction2 = new BABYLON.Vector3(0.5, -1, 0.5);
-                particleSystem.gravity = new BABYLON.Vector3(0, -2, 0);
+                // Colores blancos
                 particleSystem.color1 = new BABYLON.Color4(1, 1, 1, 0.9);
-                particleSystem.color2 = new BABYLON.Color4(0.95, 0.95, 1, 0.7);
+                particleSystem.color2 = new BABYLON.Color4(0.9, 0.95, 1, 0.8);
                 particleSystem.colorDead = new BABYLON.Color4(1, 1, 1, 0);
+                
                 particleSystem.blendMode = BABYLON.ParticleSystem.BLENDMODE_STANDARD;
                 
-                // Movimiento ondulante (viento)
-                particleSystem.minAngularSpeed = -1;
-                particleSystem.maxAngularSpeed = 1;
+                // Rotación para efecto de flotación
+                particleSystem.minAngularSpeed = -2;
+                particleSystem.maxAngularSpeed = 2;
                 
-                // Ajustar iluminación para nieve (frío, azulado)
-                light.intensity = 0.7;
-                light.groundColor = new BABYLON.Color3(0.5, 0.55, 0.65);
-                dirLight.intensity = 0.4;
-                dirLight.diffuse = new BABYLON.Color3(0.9, 0.95, 1);
-                
-                // Niebla invernal
+                // Niebla invernal suave
                 scene.fogMode = BABYLON.Scene.FOGMODE_EXP;
-                scene.fogDensity = 0.008;
-                scene.fogColor = new BABYLON.Color3(0.85, 0.88, 0.95);
+                scene.fogDensity = 0.006;
+                scene.fogColor = new BABYLON.Color3(0.85, 0.88, 0.92);
             }
             
+            // Configuración común
+            particleSystem.updateSpeed = 0.01;
+            particleSystem.billboardMode = BABYLON.ParticleSystem.BILLBOARDMODE_ALL;
+            
             particleSystem.start();
+            console.log(`Weather system started: ${weatherType}, particles: ${particleSystem.getCapacity()}`);
             return particleSystem;
         };
         
-        // Almacenar referencia a la luz para poder modificarla
-        weatherLightRef.current = { light, dirLight };
-        
         // Exponer función para cambiar clima desde fuera
         scene.changeWeather = (weatherType) => {
+            console.log('Changing weather to:', weatherType);
             weatherParticlesRef.current = createWeatherSystem(scene, weatherType);
         };
 
