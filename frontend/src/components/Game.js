@@ -399,44 +399,49 @@ const Game = () => {
         camera.angularSensibilityX = 0;
         camera.angularSensibilityY = 0;
 
-        // === CIELO CON GRADIENTE Y NUBES ===
-        scene.clearColor = new BABYLON.Color4(0.4, 0.6, 0.9, 1.0); // Color base azul claro
+        // === CIELO COMO DOMO (SOLO ARRIBA) ===
+        scene.clearColor = new BABYLON.Color4(0.53, 0.81, 0.92, 1.0); // Azul cielo como fallback
         
-        // Crear skybox con gradiente
-        const skybox = BABYLON.MeshBuilder.CreateBox("skyBox", { size: 500 }, scene);
-        const skyboxMaterial = new BABYLON.StandardMaterial("skyBoxMat", scene);
-        skyboxMaterial.backFaceCulling = false;
+        // Crear domo de cielo (hemisferio superior)
+        const skyDome = BABYLON.MeshBuilder.CreateSphere("skyDome", { 
+            diameter: 400, 
+            segments: 32,
+            slice: 0.5  // Solo la mitad superior (hemisferio)
+        }, scene);
+        skyDome.position.y = -5; // Bajar un poco para que el horizonte quede a nivel
+        
+        const skyMaterial = new BABYLON.StandardMaterial("skyMat", scene);
+        skyMaterial.backFaceCulling = false;
+        skyMaterial.disableLighting = true;
         
         // Crear textura de cielo procedural con gradiente y nubes
         const skyTexture = new BABYLON.DynamicTexture("skyTexture", 1024, scene);
         const skyCtx = skyTexture.getContext();
         const skySize = skyTexture.getSize().width;
         
-        // Gradiente de cielo (azul más oscuro arriba, más claro abajo)
+        // Gradiente de cielo (azul más oscuro arriba, más claro en horizonte)
         const skyGradient = skyCtx.createLinearGradient(0, 0, 0, skySize);
-        skyGradient.addColorStop(0, "#1a3a5c");    // Azul oscuro arriba
-        skyGradient.addColorStop(0.3, "#4a7ba7");  // Azul medio
-        skyGradient.addColorStop(0.6, "#87CEEB");  // Azul cielo
-        skyGradient.addColorStop(0.85, "#b8d4e8"); // Azul muy claro
-        skyGradient.addColorStop(1, "#e8f4f8");    // Casi blanco en el horizonte
+        skyGradient.addColorStop(0, "#1e5799");    // Azul intenso arriba (cénit)
+        skyGradient.addColorStop(0.4, "#7db9e8");  // Azul cielo medio
+        skyGradient.addColorStop(0.7, "#a8d4ea");  // Azul claro
+        skyGradient.addColorStop(1, "#d4e8f2");    // Casi blanco en horizonte
         skyCtx.fillStyle = skyGradient;
         skyCtx.fillRect(0, 0, skySize, skySize);
         
         // Añadir nubes procedurales
-        skyCtx.globalAlpha = 0.6;
-        for (let i = 0; i < 25; i++) {
+        skyCtx.globalAlpha = 0.7;
+        for (let i = 0; i < 20; i++) {
             const cloudX = Math.random() * skySize;
-            const cloudY = skySize * 0.1 + Math.random() * skySize * 0.5; // Nubes en la parte superior
-            const cloudWidth = 80 + Math.random() * 150;
-            const cloudHeight = 30 + Math.random() * 50;
+            const cloudY = skySize * 0.15 + Math.random() * skySize * 0.4;
+            const cloudWidth = 60 + Math.random() * 120;
+            const cloudHeight = 25 + Math.random() * 40;
             
-            // Dibujar nube con múltiples elipses
-            skyCtx.fillStyle = "rgba(255, 255, 255, 0.7)";
-            for (let j = 0; j < 5; j++) {
-                const offsetX = (Math.random() - 0.5) * cloudWidth * 0.6;
-                const offsetY = (Math.random() - 0.5) * cloudHeight * 0.3;
-                const blobW = cloudWidth * (0.3 + Math.random() * 0.4);
-                const blobH = cloudHeight * (0.4 + Math.random() * 0.3);
+            skyCtx.fillStyle = "rgba(255, 255, 255, 0.8)";
+            for (let j = 0; j < 6; j++) {
+                const offsetX = (Math.random() - 0.5) * cloudWidth * 0.7;
+                const offsetY = (Math.random() - 0.5) * cloudHeight * 0.4;
+                const blobW = cloudWidth * (0.25 + Math.random() * 0.35);
+                const blobH = cloudHeight * (0.35 + Math.random() * 0.35);
                 skyCtx.beginPath();
                 skyCtx.ellipse(cloudX + offsetX, cloudY + offsetY, blobW, blobH, 0, 0, Math.PI * 2);
                 skyCtx.fill();
@@ -445,10 +450,61 @@ const Game = () => {
         skyCtx.globalAlpha = 1.0;
         skyTexture.update();
         
-        skyboxMaterial.emissiveTexture = skyTexture;
-        skyboxMaterial.disableLighting = true;
-        skybox.material = skyboxMaterial;
-        skybox.infiniteDistance = true;
+        skyMaterial.emissiveTexture = skyTexture;
+        skyDome.material = skyMaterial;
+        
+        // === SUELO EXTERIOR (área alrededor del campo) ===
+        const EXTERIOR_SIZE = 120; // Suelo grande que rodea todo
+        const exteriorGround = BABYLON.MeshBuilder.CreateGround('exteriorGround', {
+            width: EXTERIOR_SIZE,
+            height: EXTERIOR_SIZE,
+            subdivisions: 4
+        }, scene);
+        exteriorGround.position.y = -0.02; // Justo debajo del campo
+        
+        // Textura de suelo exterior (tipo pista de atletismo / concreto)
+        const exteriorTexture = new BABYLON.DynamicTexture("exteriorTexture", 1024, scene);
+        const extCtx = exteriorTexture.getContext();
+        const extSize = exteriorTexture.getSize().width;
+        
+        // Color base gris/marrón rojizo (pista de atletismo)
+        const extGradient = extCtx.createRadialGradient(
+            extSize / 2, extSize / 2, 0,
+            extSize / 2, extSize / 2, extSize * 0.7
+        );
+        extGradient.addColorStop(0, "#8B4513");   // Marrón tierra en el centro
+        extGradient.addColorStop(0.3, "#A0522D"); // Sienna
+        extGradient.addColorStop(0.6, "#CD853F"); // Peru
+        extGradient.addColorStop(1, "#6B4423");   // Marrón oscuro en los bordes
+        extCtx.fillStyle = extGradient;
+        extCtx.fillRect(0, 0, extSize, extSize);
+        
+        // Añadir textura granulada (tipo pista)
+        const extImageData = extCtx.getImageData(0, 0, extSize, extSize);
+        const extData = extImageData.data;
+        for (let i = 0; i < extData.length; i += 4) {
+            const noise = (Math.random() - 0.5) * 20;
+            extData[i] = Math.max(0, Math.min(255, extData[i] + noise));
+            extData[i + 1] = Math.max(0, Math.min(255, extData[i + 1] + noise * 0.8));
+            extData[i + 2] = Math.max(0, Math.min(255, extData[i + 2] + noise * 0.5));
+        }
+        extCtx.putImageData(extImageData, 0, 0);
+        
+        // Líneas de pista de atletismo (carriles)
+        extCtx.strokeStyle = "rgba(255, 255, 255, 0.3)";
+        extCtx.lineWidth = 3;
+        for (let r = 300; r < extSize; r += 60) {
+            extCtx.beginPath();
+            extCtx.arc(extSize / 2, extSize / 2, r, 0, Math.PI * 2);
+            extCtx.stroke();
+        }
+        
+        exteriorTexture.update();
+        
+        const exteriorMaterial = new BABYLON.StandardMaterial("exteriorMat", scene);
+        exteriorMaterial.diffuseTexture = exteriorTexture;
+        exteriorMaterial.specularColor = new BABYLON.Color3(0.1, 0.1, 0.1);
+        exteriorGround.material = exteriorMaterial;
         
         // Iluminación mejorada para simular luz solar
         const light = new BABYLON.HemisphericLight('light', new BABYLON.Vector3(0, 1, 0), scene);
