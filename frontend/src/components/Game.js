@@ -705,7 +705,7 @@ const Game = () => {
             backTopBar.material = whiteMat;
             backTopBar.parent = goalRoot;
 
-            // --- REDES (NETS) - Sin techo ---
+            // --- REDES (NETS) - Con techo ---
 
             // Red Trasera (FONDO)
             const netBack = BABYLON.MeshBuilder.CreatePlane("netBack", {width: goalWidth, height: goalHeight}, scene);
@@ -730,6 +730,14 @@ const Game = () => {
             netRight.material = netMaterial;
             netRight.parent = goalRoot;
             netRight.physicsImpostor = new BABYLON.PhysicsImpostor(netRight, BABYLON.PhysicsImpostor.BoxImpostor, {mass: 0, restitution: 0.1}, scene);
+
+            // Red Superior (TECHO)
+            const netTop = BABYLON.MeshBuilder.CreatePlane("netTop", {width: goalWidth, height: goalDepth}, scene);
+            netTop.position = new BABYLON.Vector3(-goalDepth/2, goalHeight, 0);
+            netTop.rotation.x = Math.PI / 2; // Rotar para que sea horizontal (mirando hacia abajo)
+            netTop.material = netMaterial;
+            netTop.parent = goalRoot;
+            netTop.physicsImpostor = new BABYLON.PhysicsImpostor(netTop, BABYLON.PhysicsImpostor.BoxImpostor, {mass: 0, restitution: 0.1}, scene);
 
             // Orientación final de todo el grupo según el lado del campo
             if (isLeftGoal) {
