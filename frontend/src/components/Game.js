@@ -404,11 +404,11 @@ const Game = () => {
         
         // Crear domo de cielo (hemisferio superior)
         const skyDome = BABYLON.MeshBuilder.CreateSphere("skyDome", { 
-            diameter: 400, 
+            diameter: 300, 
             segments: 32,
             slice: 0.5  // Solo la mitad superior (hemisferio)
         }, scene);
-        skyDome.position.y = -5; // Bajar un poco para que el horizonte quede a nivel
+        skyDome.position.y = 0; // A nivel del suelo para ver más cielo
         
         const skyMaterial = new BABYLON.StandardMaterial("skyMat", scene);
         skyMaterial.backFaceCulling = false;
@@ -454,7 +454,7 @@ const Game = () => {
         skyDome.material = skyMaterial;
         
         // === SUELO EXTERIOR (área alrededor del campo) ===
-        const EXTERIOR_SIZE = 120; // Suelo grande que rodea todo
+        const EXTERIOR_SIZE = 80; // Tamaño moderado para ver más cielo
         const exteriorGround = BABYLON.MeshBuilder.CreateGround('exteriorGround', {
             width: EXTERIOR_SIZE,
             height: EXTERIOR_SIZE,
