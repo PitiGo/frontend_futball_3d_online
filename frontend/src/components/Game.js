@@ -399,11 +399,65 @@ const Game = () => {
         camera.angularSensibilityX = 0;
         camera.angularSensibilityY = 0;
 
-        // Iluminación
+        // === CIELO CON GRADIENTE Y NUBES ===
+        scene.clearColor = new BABYLON.Color4(0.4, 0.6, 0.9, 1.0); // Color base azul claro
+        
+        // Crear skybox con gradiente
+        const skybox = BABYLON.MeshBuilder.CreateBox("skyBox", { size: 500 }, scene);
+        const skyboxMaterial = new BABYLON.StandardMaterial("skyBoxMat", scene);
+        skyboxMaterial.backFaceCulling = false;
+        
+        // Crear textura de cielo procedural con gradiente y nubes
+        const skyTexture = new BABYLON.DynamicTexture("skyTexture", 1024, scene);
+        const skyCtx = skyTexture.getContext();
+        const skySize = skyTexture.getSize().width;
+        
+        // Gradiente de cielo (azul más oscuro arriba, más claro abajo)
+        const skyGradient = skyCtx.createLinearGradient(0, 0, 0, skySize);
+        skyGradient.addColorStop(0, "#1a3a5c");    // Azul oscuro arriba
+        skyGradient.addColorStop(0.3, "#4a7ba7");  // Azul medio
+        skyGradient.addColorStop(0.6, "#87CEEB");  // Azul cielo
+        skyGradient.addColorStop(0.85, "#b8d4e8"); // Azul muy claro
+        skyGradient.addColorStop(1, "#e8f4f8");    // Casi blanco en el horizonte
+        skyCtx.fillStyle = skyGradient;
+        skyCtx.fillRect(0, 0, skySize, skySize);
+        
+        // Añadir nubes procedurales
+        skyCtx.globalAlpha = 0.6;
+        for (let i = 0; i < 25; i++) {
+            const cloudX = Math.random() * skySize;
+            const cloudY = skySize * 0.1 + Math.random() * skySize * 0.5; // Nubes en la parte superior
+            const cloudWidth = 80 + Math.random() * 150;
+            const cloudHeight = 30 + Math.random() * 50;
+            
+            // Dibujar nube con múltiples elipses
+            skyCtx.fillStyle = "rgba(255, 255, 255, 0.7)";
+            for (let j = 0; j < 5; j++) {
+                const offsetX = (Math.random() - 0.5) * cloudWidth * 0.6;
+                const offsetY = (Math.random() - 0.5) * cloudHeight * 0.3;
+                const blobW = cloudWidth * (0.3 + Math.random() * 0.4);
+                const blobH = cloudHeight * (0.4 + Math.random() * 0.3);
+                skyCtx.beginPath();
+                skyCtx.ellipse(cloudX + offsetX, cloudY + offsetY, blobW, blobH, 0, 0, Math.PI * 2);
+                skyCtx.fill();
+            }
+        }
+        skyCtx.globalAlpha = 1.0;
+        skyTexture.update();
+        
+        skyboxMaterial.emissiveTexture = skyTexture;
+        skyboxMaterial.disableLighting = true;
+        skybox.material = skyboxMaterial;
+        skybox.infiniteDistance = true;
+        
+        // Iluminación mejorada para simular luz solar
         const light = new BABYLON.HemisphericLight('light', new BABYLON.Vector3(0, 1, 0), scene);
-        light.intensity = 0.7;
+        light.intensity = 0.8;
+        light.groundColor = new BABYLON.Color3(0.4, 0.5, 0.3); // Luz rebotada verdosa del césped
+        
         const dirLight = new BABYLON.DirectionalLight("dirLight", new BABYLON.Vector3(-1, -2, -1), scene);
-        dirLight.intensity = 0.5;
+        dirLight.intensity = 0.6;
+        dirLight.diffuse = new BABYLON.Color3(1, 0.98, 0.9); // Luz solar cálida
 
         // Definir las dimensiones del campo como constantes al inicio
         const FIELD_WIDTH = 40;
@@ -428,35 +482,45 @@ const Game = () => {
             const stripeWidth = texSize / stripeCount;
             
             for (let i = 0; i < stripeCount; i++) {
-                // Alternar entre verde claro y verde oscuro
-                const baseColor = i % 2 === 0 ? "#2d8a2e" : "#236b24";
-                ctx.fillStyle = baseColor;
+                // Crear gradiente sutil dentro de cada franja para más realismo
+                const isLight = i % 2 === 0;
+                const stripeGradient = ctx.createLinearGradient(i * stripeWidth, 0, (i + 1) * stripeWidth, 0);
+                
+                if (isLight) {
+                    stripeGradient.addColorStop(0, "#2a8529");
+                    stripeGradient.addColorStop(0.5, "#2d8a2e");
+                    stripeGradient.addColorStop(1, "#2a8529");
+                } else {
+                    stripeGradient.addColorStop(0, "#1f6320");
+                    stripeGradient.addColorStop(0.5, "#236b24");
+                    stripeGradient.addColorStop(1, "#1f6320");
+                }
+                
+                ctx.fillStyle = stripeGradient;
                 ctx.fillRect(i * stripeWidth, 0, stripeWidth, texSize);
             }
 
-            // Añadir variaciones naturales al césped
-            ctx.globalAlpha = 0.15;
-            for (let i = 0; i < 3000; i++) {
-                const x = Math.random() * texSize;
-                const y = Math.random() * texSize;
-                const radius = 3 + Math.random() * 12;
-                const colorVar = Math.random() > 0.5 ? "#1e5a1f" : "#3a9e3b";
-                ctx.beginPath();
-                ctx.fillStyle = colorVar;
-                ctx.arc(x, y, radius, 0, Math.PI * 2);
-                ctx.fill();
+            // Añadir variación de tono muy sutil con ruido (sin manchas circulares)
+            const imageData = ctx.getImageData(0, 0, texSize, texSize);
+            const data = imageData.data;
+            
+            for (let i = 0; i < data.length; i += 4) {
+                // Variación muy pequeña y natural en cada canal de color
+                const variation = (Math.random() - 0.5) * 8; // ±4 de variación
+                data[i] = Math.max(0, Math.min(255, data[i] + variation));     // R
+                data[i + 1] = Math.max(0, Math.min(255, data[i + 1] + variation)); // G
+                data[i + 2] = Math.max(0, Math.min(255, data[i + 2] + variation * 0.5)); // B (menos variación)
             }
+            ctx.putImageData(imageData, 0, 0);
 
-            // Añadir textura de briznas de hierba sutiles
-            ctx.globalAlpha = 0.08;
-            ctx.strokeStyle = "#1a4d1b";
-            for (let i = 0; i < 5000; i++) {
-                const x = Math.random() * texSize;
-                const y = Math.random() * texSize;
-                const length = 3 + Math.random() * 8;
+            // Añadir líneas horizontales muy sutiles para simular el corte del césped
+            ctx.globalAlpha = 0.03;
+            ctx.strokeStyle = "#1a4a1b";
+            ctx.lineWidth = 1;
+            for (let y = 0; y < texSize; y += 8) {
                 ctx.beginPath();
-                ctx.moveTo(x, y);
-                ctx.lineTo(x + (Math.random() - 0.5) * 3, y + length);
+                ctx.moveTo(0, y);
+                ctx.lineTo(texSize, y);
                 ctx.stroke();
             }
 
