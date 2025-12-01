@@ -2022,48 +2022,35 @@ const Game = () => {
                         </div>
 
                         {/* Joystick */}
+                        {/* Mobile Controls - Joystick & Kick Button */}
                         {gameStarted && (
-                            <div style={{
-                                position: 'fixed',
-                                bottom: '40px',
-                                left: '50%',
-                                transform: 'translateX(-50%)',
-                                touchAction: 'none',
-                                zIndex: 20,
-                                width: '180px',
-                                height: '180px',
-                                display: 'flex',
-                                justifyContent: 'center',
-                                alignItems: 'center'
-                            }}>
-                                <MobileJoystick
-                                    onDirectionChange={(vector) => {
-                                        console.log('Vector:', vector);
-                                        handleDirectionChange(vector);
-                                    }}
-                                    onBallControlChange={(control) => {
-                                        if (socketRef.current) {
-                                            socketRef.current.emit('ballControl', { control });
-                                        }
-                                    }}
-                                />
-                            </div>
+                            <MobileJoystick
+                                onDirectionChange={(vector) => {
+                                    handleDirectionChange(vector);
+                                }}
+                                onBallControlChange={(control) => {
+                                    if (socketRef.current) {
+                                        socketRef.current.emit('ballControl', { control });
+                                    }
+                                }}
+                            />
                         )}
 
-                        {/* Chat minimizable móvil */}
+                        {/* Chat minimizable móvil - movido a esquina superior derecha */}
                         <div style={{
                             position: 'fixed',
-                            bottom: isMobileChatExpanded ? '80px' : '16px',
-                            right: '16px',
-                            width: isMobileChatExpanded ? '80%' : '40px',
-                            height: isMobileChatExpanded ? '200px' : '40px',
-                            maxWidth: '300px',
-                            backgroundColor: 'rgba(0, 0, 0, 0.6)',
-                            borderRadius: '8px',
-                            zIndex: 30,
+                            top: isMobileChatExpanded ? '60px' : '10px',
+                            right: '10px',
+                            width: isMobileChatExpanded ? '85%' : '44px',
+                            height: isMobileChatExpanded ? '200px' : '44px',
+                            maxWidth: '320px',
+                            backgroundColor: 'rgba(0, 0, 0, 0.7)',
+                            borderRadius: '12px',
+                            zIndex: 1002,
                             transition: 'all 0.3s ease',
                             display: 'flex',
-                            flexDirection: 'column'
+                            flexDirection: 'column',
+                            boxShadow: '0 4px 15px rgba(0,0,0,0.3)'
                         }}>
                             <button
                                 onClick={() => setIsMobileChatExpanded(!isMobileChatExpanded)}
