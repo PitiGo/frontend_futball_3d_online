@@ -64,7 +64,7 @@ const Game = () => {
     const rootRef = useRef(null);
     const [shakeScreen, setShakeScreen] = useState(false);
     const isRedirectingRef = useRef(false);
-    
+
 
     const startConfetti = useCallback((team) => {
         const canvas = confettiCanvasRef.current;
@@ -526,13 +526,14 @@ const Game = () => {
         const createSimpleStand = (posX, posZ, rotY, length, isSouthStand) => {
             const standGroup = new BABYLON.TransformNode("standGroup", scene);
             
-            // Bloque principal de la grada (forma escalonada simplificada)
+            // Bloque principal de la grada - más bajo en el sur para no tapar la cámara
+            const standHeight = isSouthStand ? 4 : 6;
             const standBase = BABYLON.MeshBuilder.CreateBox("standBase", {
                 width: length,
-                height: 6,
+                height: standHeight,
                 depth: 10
             }, scene);
-            standBase.position.y = 3;
+            standBase.position.y = standHeight / 2;
             standBase.parent = standGroup;
             
             // Textura procedural con asientos
@@ -559,39 +560,37 @@ const Game = () => {
             standMat.diffuseTexture = standTexture;
             standBase.material = standMat;
             
-            // Techo simple - más bajo y menos profundo para la tribuna sur (no tapa la cámara)
-            const roofHeight = isSouthStand ? 6 : 8; // Más bajo en el sur
-            const roofDepth = isSouthStand ? 8 : 12; // Menos profundo en el sur
-            const roof = BABYLON.MeshBuilder.CreateBox("roof", {
-                width: length + 2,
-                height: 0.4,
-                depth: roofDepth
-            }, scene);
-            roof.position.y = roofHeight;
-            roof.position.z = isSouthStand ? -2 : 0; // Mover hacia atrás en el sur
-            roof.parent = standGroup;
-            roof.material = grayMat;
-            
-            // Solo 3 pilares - más bajos en el sur
-            const pillarHeight = isSouthStand ? 6 : 8;
-            [-length/3, 0, length/3].forEach((px) => {
-                const pillar = BABYLON.MeshBuilder.CreateCylinder("pillar", {
-                    diameter: 0.5,
-                    height: pillarHeight
+            // Techo solo para la tribuna norte (sur sin techo para no tapar la cámara)
+            if (!isSouthStand) {
+                const roof = BABYLON.MeshBuilder.CreateBox("roof", {
+                    width: length + 2,
+                    height: 0.4,
+                    depth: 12
                 }, scene);
-                pillar.position.set(px, pillarHeight / 2, isSouthStand ? 2 : 5);
-                pillar.parent = standGroup;
-                pillar.material = grayMat;
-            });
+                roof.position.y = 8;
+                roof.parent = standGroup;
+                roof.material = grayMat;
+                
+                // Pilares solo en el norte
+                [-length/3, 0, length/3].forEach((px) => {
+                    const pillar = BABYLON.MeshBuilder.CreateCylinder("pillar", {
+                        diameter: 0.5,
+                        height: 8
+                    }, scene);
+                    pillar.position.set(px, 4, 5);
+                    pillar.parent = standGroup;
+                    pillar.material = grayMat;
+                });
+            }
             
             standGroup.position.set(posX, 0, posZ);
             standGroup.rotation.y = rotY;
             return standGroup;
         };
         
-        // Crear gradas en ambos lados largos (la del sur tiene parámetro isSouthStand=true)
-        createSimpleStand(0, -fieldH / 2 - 8, 0, fieldW - 5, true);   // Lado sur - más baja
-        createSimpleStand(0, fieldH / 2 + 8, Math.PI, fieldW - 5, false); // Lado norte
+        // Crear gradas en ambos lados largos (la del sur sin techo y más baja)
+        createSimpleStand(0, -fieldH / 2 - 8, 0, fieldW - 5, true);   // Lado sur - sin techo, más baja
+        createSimpleStand(0, fieldH / 2 + 8, Math.PI, fieldW - 5, false); // Lado norte - con techo
         
         // --- 2. TORRES DE ILUMINACIÓN simplificadas ---
         const createLightTower = (posX, posZ) => {
@@ -1037,7 +1036,7 @@ const Game = () => {
             const topBarL = BABYLON.MeshBuilder.CreateTube("topBarL", {
                 path: [new BABYLON.Vector3(0, goalHeight, -goalWidth/2), new BABYLON.Vector3(-goalDepth, goalHeight, -goalWidth/2)],
                 radius: postRadius * 0.7
-            }, scene);
+                }, scene);
             topBarL.material = whiteMat;
             topBarL.parent = goalRoot;
 
@@ -1660,7 +1659,7 @@ const Game = () => {
             if (gameOverData) {
                 console.log('>>> [FRONTEND] Guardando gameOverInfo y mostrando mensaje...');
                 setGameOverInfo(gameOverData);
-                setShowingEndMessage(true);
+            setShowingEndMessage(true);
                 console.log('>>> [FRONTEND] Estados actualizados - showingEndMessage debería ser true');
             } else {
                 console.error('>>> [FRONTEND] ERROR: gameOverData es null o undefined!');
@@ -2217,16 +2216,16 @@ const Game = () => {
                         {/* Joystick */}
                         {/* Mobile Controls - Joystick & Kick Button */}
                         {gameStarted && (
-                            <MobileJoystick
-                                onDirectionChange={(vector) => {
-                                    handleDirectionChange(vector);
-                                }}
-                                onBallControlChange={(control) => {
-                                    if (socketRef.current) {
-                                        socketRef.current.emit('ballControl', { control });
-                                    }
-                                }}
-                            />
+                                <MobileJoystick
+                                    onDirectionChange={(vector) => {
+                                        handleDirectionChange(vector);
+                                    }}
+                                    onBallControlChange={(control) => {
+                                        if (socketRef.current) {
+                                            socketRef.current.emit('ballControl', { control });
+                                        }
+                                    }}
+                                />
                         )}
 
                         {/* Chat minimizable móvil - movido a esquina superior derecha */}
