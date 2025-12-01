@@ -517,239 +517,152 @@ const Game = () => {
         const fieldW = 40;
         const fieldH = 30;
         
-        // --- 1. GRADAS (Tribunas) a los lados largos del campo ---
-        const createStand = (posX, posZ, rotY, length) => {
+        // Materiales compartidos para optimización
+        const grayMat = new BABYLON.StandardMaterial("grayMat", scene);
+        grayMat.diffuseColor = new BABYLON.Color3(0.5, 0.5, 0.55);
+        grayMat.freeze();
+        
+        const whiteMat = new BABYLON.StandardMaterial("whiteMat", scene);
+        whiteMat.diffuseColor = new BABYLON.Color3(0.9, 0.9, 0.9);
+        whiteMat.freeze();
+        
+        // --- 1. GRADAS SIMPLIFICADAS (un solo bloque con textura) ---
+        const createSimpleStand = (posX, posZ, rotY, length) => {
             const standGroup = new BABYLON.TransformNode("standGroup", scene);
             
-            // Base de la grada (escalones)
-            const standHeight = 8;
-            const standDepth = 12;
-            const stepCount = 8;
+            // Bloque principal de la grada (forma escalonada simplificada)
+            const standBase = BABYLON.MeshBuilder.CreateBox("standBase", {
+                width: length,
+                height: 6,
+                depth: 10
+            }, scene);
+            standBase.position.y = 3;
+            standBase.parent = standGroup;
             
-            for (let i = 0; i < stepCount; i++) {
-                const stepWidth = length;
-                const stepHeight = standHeight / stepCount;
-                const stepDepth = standDepth / stepCount;
-                
-                const step = BABYLON.MeshBuilder.CreateBox(`step${i}`, {
-                    width: stepWidth,
-                    height: stepHeight * (i + 1),
-                    depth: stepDepth
-                }, scene);
-                
-                step.position.x = 0;
-                step.position.y = (stepHeight * (i + 1)) / 2;
-                step.position.z = i * stepDepth - standDepth / 2;
-                step.parent = standGroup;
-                
-                // Material gris para el concreto
-                const stepMat = new BABYLON.StandardMaterial(`stepMat${i}`, scene);
-                stepMat.diffuseColor = new BABYLON.Color3(0.6, 0.6, 0.65);
-                step.material = stepMat;
-            }
+            // Textura procedural con asientos
+            const standTexture = new BABYLON.DynamicTexture("standTex", { width: 512, height: 256 }, scene);
+            const stCtx = standTexture.getContext();
             
-            // Asientos (puntos de color)
-            const seatColors = [
-                new BABYLON.Color3(0.2, 0.4, 0.8),  // Azul
-                new BABYLON.Color3(0.8, 0.2, 0.2),  // Rojo
-                new BABYLON.Color3(0.9, 0.7, 0.1),  // Amarillo
-            ];
+            // Fondo gris
+            stCtx.fillStyle = '#666666';
+            stCtx.fillRect(0, 0, 512, 256);
             
-            for (let row = 0; row < stepCount - 1; row++) {
-                const seatsPerRow = Math.floor(length / 1.5);
-                for (let s = 0; s < seatsPerRow; s++) {
-                    const seat = BABYLON.MeshBuilder.CreateBox("seat", {
-                        width: 0.8,
-                        height: 0.6,
-                        depth: 0.5
-                    }, scene);
-                    
-                    seat.position.x = (s - seatsPerRow / 2) * 1.2 + 0.6;
-                    seat.position.y = (row + 1) * (standHeight / stepCount) + 0.3;
-                    seat.position.z = row * (standDepth / stepCount) - standDepth / 2 + 0.5;
-                    seat.parent = standGroup;
-                    
-                    const seatMat = new BABYLON.StandardMaterial("seatMat", scene);
-                    seatMat.diffuseColor = seatColors[Math.floor(Math.random() * seatColors.length)];
-                    seat.material = seatMat;
+            // Dibujar filas de asientos
+            const seatColors = ['#2563eb', '#dc2626', '#facc15', '#2563eb', '#dc2626'];
+            const rowHeight = 256 / 6;
+            for (let row = 0; row < 6; row++) {
+                const seatWidth = 20;
+                for (let s = 0; s < 25; s++) {
+                    stCtx.fillStyle = seatColors[Math.floor(Math.random() * seatColors.length)];
+                    stCtx.fillRect(s * seatWidth + 2, row * rowHeight + 5, seatWidth - 4, rowHeight - 10);
                 }
             }
+            standTexture.update();
             
-            // Techo de la grada
+            const standMat = new BABYLON.StandardMaterial("standMat", scene);
+            standMat.diffuseTexture = standTexture;
+            standBase.material = standMat;
+            
+            // Techo simple
             const roof = BABYLON.MeshBuilder.CreateBox("roof", {
                 width: length + 2,
-                height: 0.3,
-                depth: standDepth + 4
+                height: 0.4,
+                depth: 12
             }, scene);
-            roof.position.y = standHeight + 2;
-            roof.position.z = 0;
+            roof.position.y = 8;
             roof.parent = standGroup;
+            roof.material = grayMat;
             
-            const roofMat = new BABYLON.StandardMaterial("roofMat", scene);
-            roofMat.diffuseColor = new BABYLON.Color3(0.3, 0.3, 0.35);
-            roof.material = roofMat;
-            
-            // Pilares del techo
-            const pillarPositions = [-length/2 + 2, -length/4, 0, length/4, length/2 - 2];
-            pillarPositions.forEach((px) => {
+            // Solo 3 pilares
+            [-length/3, 0, length/3].forEach((px) => {
                 const pillar = BABYLON.MeshBuilder.CreateCylinder("pillar", {
-                    diameter: 0.4,
-                    height: standHeight + 2
+                    diameter: 0.5,
+                    height: 8
                 }, scene);
-                pillar.position.x = px;
-                pillar.position.y = (standHeight + 2) / 2;
-                pillar.position.z = standDepth / 2;
+                pillar.position.set(px, 4, 5);
                 pillar.parent = standGroup;
-                pillar.material = roofMat;
+                pillar.material = grayMat;
             });
             
-            standGroup.position.x = posX;
-            standGroup.position.z = posZ;
+            standGroup.position.set(posX, 0, posZ);
             standGroup.rotation.y = rotY;
-            
             return standGroup;
         };
         
         // Crear gradas en ambos lados largos
-        createStand(0, -fieldH / 2 - 10, 0, fieldW - 5);           // Lado sur
-        createStand(0, fieldH / 2 + 10, Math.PI, fieldW - 5);      // Lado norte
+        createSimpleStand(0, -fieldH / 2 - 8, 0, fieldW - 5);
+        createSimpleStand(0, fieldH / 2 + 8, Math.PI, fieldW - 5);
         
-        // --- 2. TORRES DE ILUMINACIÓN en las esquinas ---
+        // --- 2. TORRES DE ILUMINACIÓN simplificadas ---
         const createLightTower = (posX, posZ) => {
-            const towerGroup = new BABYLON.TransformNode("lightTower", scene);
-            
             // Poste principal
             const pole = BABYLON.MeshBuilder.CreateCylinder("pole", {
-                diameter: 0.5,
-                height: 20
+                diameter: 0.4,
+                height: 18
             }, scene);
-            pole.position.y = 10;
-            pole.parent = towerGroup;
+            pole.position.set(posX, 9, posZ);
+            pole.material = grayMat;
             
-            const poleMat = new BABYLON.StandardMaterial("poleMat", scene);
-            poleMat.diffuseColor = new BABYLON.Color3(0.7, 0.7, 0.7);
-            pole.material = poleMat;
-            
-            // Plataforma de luces
+            // Plataforma con luces
             const platform = BABYLON.MeshBuilder.CreateBox("platform", {
-                width: 4,
-                height: 0.5,
-                depth: 2
+                width: 3,
+                height: 0.4,
+                depth: 1.5
             }, scene);
-            platform.position.y = 20;
-            platform.parent = towerGroup;
-            platform.material = poleMat;
+            platform.position.set(posX, 18, posZ);
             
-            // Luces (cajas brillantes)
-            for (let i = 0; i < 4; i++) {
-                const lightBox = BABYLON.MeshBuilder.CreateBox("lightBox", {
-                    width: 0.8,
-                    height: 0.6,
-                    depth: 0.4
-                }, scene);
-                lightBox.position.x = (i - 1.5) * 1;
-                lightBox.position.y = 19.7;
-                lightBox.position.z = 0;
-                lightBox.parent = towerGroup;
-                
-                const lightMat = new BABYLON.StandardMaterial("lightMat", scene);
-                lightMat.emissiveColor = new BABYLON.Color3(1, 0.95, 0.8);
-                lightMat.diffuseColor = new BABYLON.Color3(1, 0.95, 0.8);
-                lightBox.material = lightMat;
-            }
-            
-            towerGroup.position.x = posX;
-            towerGroup.position.z = posZ;
-            
-            // Rotar para que las luces apunten al campo
-            towerGroup.lookAt(new BABYLON.Vector3(0, 0, 0));
-            towerGroup.rotation.x = 0;
-            towerGroup.rotation.z = 0;
-            
-            return towerGroup;
+            const lightMat = new BABYLON.StandardMaterial("lightMat", scene);
+            lightMat.emissiveColor = new BABYLON.Color3(1, 0.95, 0.8);
+            platform.material = lightMat;
         };
         
         // Torres en las 4 esquinas
-        createLightTower(-fieldW / 2 - 8, -fieldH / 2 - 8);
-        createLightTower(fieldW / 2 + 8, -fieldH / 2 - 8);
-        createLightTower(-fieldW / 2 - 8, fieldH / 2 + 8);
-        createLightTower(fieldW / 2 + 8, fieldH / 2 + 8);
+        createLightTower(-fieldW / 2 - 6, -fieldH / 2 - 6);
+        createLightTower(fieldW / 2 + 6, -fieldH / 2 - 6);
+        createLightTower(-fieldW / 2 - 6, fieldH / 2 + 6);
+        createLightTower(fieldW / 2 + 6, fieldH / 2 + 6);
         
-        // --- 3. BANQUILLOS a un lado del campo ---
+        // --- 3. BANQUILLOS simplificados ---
         const createBench = (posX, posZ, teamColor) => {
-            const benchGroup = new BABYLON.TransformNode("bench", scene);
-            
             // Techo
             const benchRoof = BABYLON.MeshBuilder.CreateBox("benchRoof", {
-                width: 6,
-                height: 0.2,
-                depth: 3
+                width: 5,
+                height: 0.15,
+                depth: 2.5
             }, scene);
-            benchRoof.position.y = 2.5;
-            benchRoof.parent = benchGroup;
+            benchRoof.position.set(posX, 2.2, posZ);
             
             const roofMat = new BABYLON.StandardMaterial("benchRoofMat", scene);
             roofMat.diffuseColor = teamColor;
             benchRoof.material = roofMat;
             
-            // Pilares
-            const pillarPositions = [[-2.5, 1], [2.5, 1], [-2.5, -1], [2.5, -1]];
-            pillarPositions.forEach(([px, pz]) => {
-                const pillar = BABYLON.MeshBuilder.CreateCylinder("benchPillar", {
-                    diameter: 0.15,
-                    height: 2.5
-                }, scene);
-                pillar.position.set(px, 1.25, pz);
-                pillar.parent = benchGroup;
-                
-                const pillarMat = new BABYLON.StandardMaterial("pillarMat", scene);
-                pillarMat.diffuseColor = new BABYLON.Color3(0.3, 0.3, 0.3);
-                pillar.material = pillarMat;
-            });
-            
-            // Asientos
+            // Base/asiento
             const seatBench = BABYLON.MeshBuilder.CreateBox("seatBench", {
-                width: 5,
-                height: 0.3,
-                depth: 0.8
+                width: 4,
+                height: 0.5,
+                depth: 1
             }, scene);
-            seatBench.position.y = 0.5;
-            seatBench.position.z = 0.8;
-            seatBench.parent = benchGroup;
-            
-            const seatMat = new BABYLON.StandardMaterial("seatBenchMat", scene);
-            seatMat.diffuseColor = new BABYLON.Color3(0.2, 0.2, 0.2);
-            seatBench.material = seatMat;
-            
-            benchGroup.position.set(posX, 0, posZ);
-            return benchGroup;
+            seatBench.position.set(posX, 0.25, posZ);
+            seatBench.material = grayMat;
         };
         
-        // Banquillos para ambos equipos
-        createBench(-8, -fieldH / 2 - 4, new BABYLON.Color3(0.2, 0.4, 0.9));  // Equipo azul
-        createBench(8, -fieldH / 2 - 4, new BABYLON.Color3(0.9, 0.2, 0.2));   // Equipo rojo
+        createBench(-7, -fieldH / 2 - 3.5, new BABYLON.Color3(0.2, 0.4, 0.9));
+        createBench(7, -fieldH / 2 - 3.5, new BABYLON.Color3(0.9, 0.2, 0.2));
         
         // --- 4. BANDERINES DE CÓRNER ---
         const createCornerFlag = (posX, posZ) => {
-            // Poste
             const flagPole = BABYLON.MeshBuilder.CreateCylinder("flagPole", {
-                diameter: 0.08,
-                height: 1.8
+                diameter: 0.06,
+                height: 1.5
             }, scene);
-            flagPole.position.set(posX, 0.9, posZ);
+            flagPole.position.set(posX, 0.75, posZ);
+            flagPole.material = whiteMat;
             
-            const poleMat = new BABYLON.StandardMaterial("flagPoleMat", scene);
-            poleMat.diffuseColor = new BABYLON.Color3(1, 1, 1);
-            flagPole.material = poleMat;
-            
-            // Banderín triangular
-            const flag = BABYLON.MeshBuilder.CreateDisc("flag", {
-                radius: 0.3,
-                tessellation: 3
+            const flag = BABYLON.MeshBuilder.CreatePlane("flag", {
+                width: 0.4,
+                height: 0.3
             }, scene);
-            flag.position.set(posX + 0.15, 1.7, posZ);
-            flag.rotation.y = Math.PI / 2;
-            flag.rotation.z = Math.PI / 6;
+            flag.position.set(posX + 0.2, 1.35, posZ);
             
             const flagMat = new BABYLON.StandardMaterial("flagMat", scene);
             flagMat.diffuseColor = new BABYLON.Color3(1, 0.5, 0);
@@ -757,52 +670,35 @@ const Game = () => {
             flag.material = flagMat;
         };
         
-        // Banderas en las 4 esquinas del campo
         createCornerFlag(-fieldW / 2, -fieldH / 2);
         createCornerFlag(fieldW / 2, -fieldH / 2);
         createCornerFlag(-fieldW / 2, fieldH / 2);
         createCornerFlag(fieldW / 2, fieldH / 2);
         
-        // --- 5. VALLAS PUBLICITARIAS alrededor del campo ---
-        const createAdBoard = (posX, posZ, rotY, width) => {
-            const board = BABYLON.MeshBuilder.CreateBox("adBoard", {
-                width: width,
-                height: 1,
-                depth: 0.1
-            }, scene);
-            board.position.set(posX, 0.5, posZ);
-            board.rotation.y = rotY;
-            
-            // Textura procedural con "publicidad"
-            const adTexture = new BABYLON.DynamicTexture("adTex", { width: 512, height: 64 }, scene);
-            const adCtx = adTexture.getContext();
-            
-            // Fondo con colores alternados
-            const colors = ['#1a5fb4', '#e01b24', '#33d17a', '#f5c211', '#9141ac'];
-            const sectionWidth = 512 / colors.length;
-            colors.forEach((color, i) => {
-                adCtx.fillStyle = color;
-                adCtx.fillRect(i * sectionWidth, 0, sectionWidth, 64);
-            });
-            
-            adTexture.update();
-            
-            const adMat = new BABYLON.StandardMaterial("adMat", scene);
-            adMat.diffuseTexture = adTexture;
-            adMat.emissiveColor = new BABYLON.Color3(0.2, 0.2, 0.2);
-            board.material = adMat;
-        };
+        // --- 5. VALLAS PUBLICITARIAS (menos cantidad) ---
+        const adMat = new BABYLON.StandardMaterial("adMat", scene);
+        const adTexture = new BABYLON.DynamicTexture("adTex", { width: 512, height: 64 }, scene);
+        const adCtx = adTexture.getContext();
+        const colors = ['#1a5fb4', '#e01b24', '#33d17a', '#f5c211', '#9141ac'];
+        colors.forEach((color, i) => {
+            adCtx.fillStyle = color;
+            adCtx.fillRect(i * 102.4, 0, 102.4, 64);
+        });
+        adTexture.update();
+        adMat.diffuseTexture = adTexture;
+        adMat.emissiveColor = new BABYLON.Color3(0.15, 0.15, 0.15);
+        adMat.freeze();
         
-        // Vallas en los laterales del campo
-        const adSpacing = 10;
-        for (let i = -fieldW / 2 + adSpacing / 2; i < fieldW / 2; i += adSpacing) {
-            createAdBoard(i, -fieldH / 2 - 1.5, 0, adSpacing - 0.5);
-            createAdBoard(i, fieldH / 2 + 1.5, Math.PI, adSpacing - 0.5);
-        }
-        
-        // Vallas detrás de las porterías (más cortas para no bloquear vista)
-        createAdBoard(-fieldW / 2 - 1.5, 0, Math.PI / 2, fieldH - 10);
-        createAdBoard(fieldW / 2 + 1.5, 0, -Math.PI / 2, fieldH - 10);
+        // Solo 2 vallas por lado largo (en lugar de 8)
+        [-fieldW / 4, fieldW / 4].forEach(x => {
+            const board1 = BABYLON.MeshBuilder.CreateBox("adBoard", { width: 15, height: 0.8, depth: 0.08 }, scene);
+            board1.position.set(x, 0.4, -fieldH / 2 - 1.2);
+            board1.material = adMat;
+            
+            const board2 = BABYLON.MeshBuilder.CreateBox("adBoard", { width: 15, height: 0.8, depth: 0.08 }, scene);
+            board2.position.set(x, 0.4, fieldH / 2 + 1.2);
+            board2.material = adMat;
+        });
         
         // Iluminación mejorada para simular luz solar
         const light = new BABYLON.HemisphericLight('light', new BABYLON.Vector3(0, 1, 0), scene);
