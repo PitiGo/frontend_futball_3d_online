@@ -523,7 +523,7 @@ const Game = () => {
         whiteMat.freeze();
         
         // --- 1. GRADAS SIMPLIFICADAS (un solo bloque con textura) ---
-        const createSimpleStand = (posX, posZ, rotY, length) => {
+        const createSimpleStand = (posX, posZ, rotY, length, isSouthStand) => {
             const standGroup = new BABYLON.TransformNode("standGroup", scene);
             
             // Bloque principal de la grada (forma escalonada simplificada)
@@ -559,23 +559,27 @@ const Game = () => {
             standMat.diffuseTexture = standTexture;
             standBase.material = standMat;
             
-            // Techo simple
+            // Techo simple - más bajo y menos profundo para la tribuna sur (no tapa la cámara)
+            const roofHeight = isSouthStand ? 6 : 8; // Más bajo en el sur
+            const roofDepth = isSouthStand ? 8 : 12; // Menos profundo en el sur
             const roof = BABYLON.MeshBuilder.CreateBox("roof", {
                 width: length + 2,
                 height: 0.4,
-                depth: 12
+                depth: roofDepth
             }, scene);
-            roof.position.y = 8;
+            roof.position.y = roofHeight;
+            roof.position.z = isSouthStand ? -2 : 0; // Mover hacia atrás en el sur
             roof.parent = standGroup;
             roof.material = grayMat;
             
-            // Solo 3 pilares
+            // Solo 3 pilares - más bajos en el sur
+            const pillarHeight = isSouthStand ? 6 : 8;
             [-length/3, 0, length/3].forEach((px) => {
                 const pillar = BABYLON.MeshBuilder.CreateCylinder("pillar", {
                     diameter: 0.5,
-                    height: 8
+                    height: pillarHeight
                 }, scene);
-                pillar.position.set(px, 4, 5);
+                pillar.position.set(px, pillarHeight / 2, isSouthStand ? 2 : 5);
                 pillar.parent = standGroup;
                 pillar.material = grayMat;
             });
@@ -585,9 +589,9 @@ const Game = () => {
             return standGroup;
         };
         
-        // Crear gradas en ambos lados largos
-        createSimpleStand(0, -fieldH / 2 - 8, 0, fieldW - 5);
-        createSimpleStand(0, fieldH / 2 + 8, Math.PI, fieldW - 5);
+        // Crear gradas en ambos lados largos (la del sur tiene parámetro isSouthStand=true)
+        createSimpleStand(0, -fieldH / 2 - 8, 0, fieldW - 5, true);   // Lado sur - más baja
+        createSimpleStand(0, fieldH / 2 + 8, Math.PI, fieldW - 5, false); // Lado norte
         
         // --- 2. TORRES DE ILUMINACIÓN simplificadas ---
         const createLightTower = (posX, posZ) => {
