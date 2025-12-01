@@ -732,9 +732,10 @@ const Game = () => {
             netRight.physicsImpostor = new BABYLON.PhysicsImpostor(netRight, BABYLON.PhysicsImpostor.BoxImpostor, {mass: 0, restitution: 0.1}, scene);
 
             // Red Superior (TECHO)
-            const netTop = BABYLON.MeshBuilder.CreatePlane("netTop", {width: goalWidth, height: goalDepth}, scene);
+            // width → eje X (profundidad), height → eje Z después de rotar (ancho de portería)
+            const netTop = BABYLON.MeshBuilder.CreatePlane("netTop", {width: goalDepth, height: goalWidth}, scene);
             netTop.position = new BABYLON.Vector3(-goalDepth/2, goalHeight, 0);
-            netTop.rotation.x = Math.PI / 2; // Rotar para que sea horizontal (mirando hacia abajo)
+            netTop.rotation.x = -Math.PI / 2; // Rotar para que sea horizontal (mirando hacia abajo)
             netTop.material = netMaterial;
             netTop.parent = goalRoot;
             netTop.physicsImpostor = new BABYLON.PhysicsImpostor(netTop, BABYLON.PhysicsImpostor.BoxImpostor, {mass: 0, restitution: 0.1}, scene);
