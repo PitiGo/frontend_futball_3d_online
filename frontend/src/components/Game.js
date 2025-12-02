@@ -565,13 +565,15 @@ const Game = () => {
                 });
                 
                 // Cartel publicitario con imagen del juego (MamVsReptiles)
+                // Crear el banner FUERA del standGroup para posicionarlo correctamente
                 const banner = BABYLON.MeshBuilder.CreatePlane("gameBanner", {
-                    width: 18,
-                    height: 6,
+                    width: 20,
+                    height: 8,
                     sideOrientation: BABYLON.Mesh.DOUBLESIDE
                 }, scene);
-                banner.position.set(0, 5.5, -6); // Hacia el campo (Z negativo porque la tribuna está rotada)
-                banner.parent = standGroup;
+                // Posición absoluta: encima de la tribuna norte, mirando hacia el campo
+                banner.position.set(0, 10, fieldH / 2 + 5);
+                banner.rotation.x = Math.PI * 0.1; // Inclinado ligeramente hacia abajo
                 
                 const bannerMat = new BABYLON.StandardMaterial("bannerMat", scene);
                 const bannerTexture = new BABYLON.Texture(
@@ -585,20 +587,17 @@ const Game = () => {
                 );
                 bannerMat.diffuseTexture = bannerTexture;
                 bannerMat.emissiveTexture = bannerTexture;
-                bannerMat.emissiveColor = new BABYLON.Color3(0.8, 0.8, 0.8);
+                bannerMat.emissiveColor = new BABYLON.Color3(1, 1, 1); // Brillo máximo
                 bannerMat.specularColor = new BABYLON.Color3(0, 0, 0);
-                bannerMat.backFaceCulling = false;
                 banner.material = bannerMat;
                 
                 // Marco del cartel
-                const frameTop = BABYLON.MeshBuilder.CreateBox("frameTop", { width: 18.4, height: 0.3, depth: 0.2 }, scene);
-                frameTop.position.set(0, 8.6, -6);
-                frameTop.parent = standGroup;
+                const frameTop = BABYLON.MeshBuilder.CreateBox("frameTop", { width: 20.4, height: 0.4, depth: 0.3 }, scene);
+                frameTop.position.set(0, 14.2, fieldH / 2 + 5);
                 frameTop.material = grayMat;
                 
-                const frameBottom = BABYLON.MeshBuilder.CreateBox("frameBottom", { width: 18.4, height: 0.3, depth: 0.2 }, scene);
-                frameBottom.position.set(0, 2.4, -6);
-                frameBottom.parent = standGroup;
+                const frameBottom = BABYLON.MeshBuilder.CreateBox("frameBottom", { width: 20.4, height: 0.4, depth: 0.3 }, scene);
+                frameBottom.position.set(0, 5.8, fieldH / 2 + 5);
                 frameBottom.material = grayMat;
             }
             
