@@ -588,8 +588,7 @@ const Game = () => {
             return standGroup;
         };
         
-        // Crear gradas en ambos lados largos (la del sur sin techo y más baja)
-        createSimpleStand(0, -fieldH / 2 - 8, 0, fieldW - 5, true);   // Lado sur - sin techo, más baja
+        // Crear grada solo en el lado norte (la del sur eliminada para mejor visibilidad)
         createSimpleStand(0, fieldH / 2 + 8, Math.PI, fieldW - 5, false); // Lado norte - con techo
         
         // --- 2. TORRES DE ILUMINACIÓN simplificadas ---
