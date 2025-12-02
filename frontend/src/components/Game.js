@@ -565,14 +565,21 @@ const Game = () => {
                 });
                 
                 // Cartel publicitario con imagen del juego (MamVsReptiles)
-                // En la parte frontal de la tribuna, mirando hacia el campo
+                // En la parte frontal de la tribuna, encajado perfectamente
+                // standBase: width=length, height=6, depth=10, posición Y=3 (centro)
+                // La tribuna está en posZ con rotación PI, así que el frente local (-Z) apunta al campo
+                // El frente de la tribuna está en: posZ - depth/2 = fieldH/2 + 8 - 5 = fieldH/2 + 3
+                const bannerWidth = length - 2; // Un poco menos que el ancho de la tribuna
+                const bannerHeight = standHeight - 0.5; // Casi toda la altura de la tribuna
                 const banner = BABYLON.MeshBuilder.CreatePlane("gameBanner", {
-                    width: 18,
-                    height: 5,
+                    width: bannerWidth,
+                    height: bannerHeight,
                     sideOrientation: BABYLON.Mesh.DOUBLESIDE
                 }, scene);
-                // Posición: en la cara frontal de la tribuna (Z = fieldH/2 + 3 es el frente de la grada)
-                banner.position.set(0, 3.5, fieldH / 2 + 3);
+                // Posición relativa al standGroup (que tiene rotación PI)
+                // Z negativo = hacia el campo, Y = centro de la altura
+                banner.position.set(0, standHeight / 2, -5.01); // -5.01 para que esté justo delante del frente
+                banner.parent = standGroup;
                 
                 const bannerMat = new BABYLON.StandardMaterial("bannerMat", scene);
                 const bannerTexture = new BABYLON.Texture(
