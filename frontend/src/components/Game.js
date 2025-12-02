@@ -577,7 +577,7 @@ const Game = () => {
                 
                 const bannerMat = new BABYLON.StandardMaterial("bannerMat", scene);
                 const bannerTexture = new BABYLON.Texture(
-                    process.env.PUBLIC_URL + "/mamvsreptiles.png",
+                    process.env.PUBLIC_URL + "/mamvsreptiles.webp",
                     scene,
                     false, // noMipmap
                     true,  // invertY
