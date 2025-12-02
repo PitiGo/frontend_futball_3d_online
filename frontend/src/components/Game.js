@@ -574,10 +574,20 @@ const Game = () => {
                 banner.parent = standGroup;
                 
                 const bannerMat = new BABYLON.StandardMaterial("bannerMat", scene);
-                bannerMat.diffuseTexture = new BABYLON.Texture("/mamvsreptiles.webp", scene);
-                bannerMat.emissiveTexture = new BABYLON.Texture("/mamvsreptiles.webp", scene); // Brillo propio
-                bannerMat.emissiveColor = new BABYLON.Color3(0.5, 0.5, 0.5);
-                bannerMat.specularColor = new BABYLON.Color3(0, 0, 0); // Sin brillo especular
+                const bannerTexture = new BABYLON.Texture(
+                    process.env.PUBLIC_URL + "/mamvsreptiles.png",
+                    scene,
+                    false, // noMipmap
+                    true,  // invertY
+                    BABYLON.Texture.TRILINEAR_SAMPLINGMODE,
+                    () => { console.log("Banner texture loaded successfully"); },
+                    (msg, ex) => { console.error("Banner texture failed to load:", msg, ex); }
+                );
+                bannerMat.diffuseTexture = bannerTexture;
+                bannerMat.emissiveTexture = bannerTexture;
+                bannerMat.emissiveColor = new BABYLON.Color3(0.8, 0.8, 0.8);
+                bannerMat.specularColor = new BABYLON.Color3(0, 0, 0);
+                bannerMat.backFaceCulling = false;
                 banner.material = bannerMat;
                 
                 // Marco del cartel
