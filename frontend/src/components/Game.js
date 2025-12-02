@@ -536,28 +536,10 @@ const Game = () => {
             standBase.position.y = standHeight / 2;
             standBase.parent = standGroup;
             
-            // Textura procedural con asientos
-            const standTexture = new BABYLON.DynamicTexture("standTex", { width: 512, height: 256 }, scene);
-            const stCtx = standTexture.getContext();
-            
-            // Fondo gris
-            stCtx.fillStyle = '#666666';
-            stCtx.fillRect(0, 0, 512, 256);
-            
-            // Dibujar filas de asientos
-            const seatColors = ['#2563eb', '#dc2626', '#facc15', '#2563eb', '#dc2626'];
-            const rowHeight = 256 / 6;
-            for (let row = 0; row < 6; row++) {
-                const seatWidth = 20;
-                for (let s = 0; s < 25; s++) {
-                    stCtx.fillStyle = seatColors[Math.floor(Math.random() * seatColors.length)];
-                    stCtx.fillRect(s * seatWidth + 2, row * rowHeight + 5, seatWidth - 4, rowHeight - 10);
-                }
-            }
-            standTexture.update();
-            
+            // Material simple gris para la grada (sin asientos de colores)
             const standMat = new BABYLON.StandardMaterial("standMat", scene);
-            standMat.diffuseTexture = standTexture;
+            standMat.diffuseColor = new BABYLON.Color3(0.4, 0.4, 0.45);
+            standMat.specularColor = new BABYLON.Color3(0.1, 0.1, 0.1);
             standBase.material = standMat;
             
             // Techo solo para la tribuna norte (sur sin techo para no tapar la cámara)
