@@ -46,9 +46,11 @@ jobs:
             echo "🏗️ Levantando nuevos contenedores..."
             # Lógica para detectar versión de Docker
             if docker compose version >/dev/null 2>&1; then
-                docker compose up --build -d
+                docker compose build --no-cache
+                docker compose up -d
             else
-                docker-compose up --build -d
+                docker-compose build --no-cache
+                docker-compose up -d
             fi
             
             echo "🧹 Limpiando imágenes basura..."
