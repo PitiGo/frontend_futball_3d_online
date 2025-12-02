@@ -565,15 +565,14 @@ const Game = () => {
                 });
                 
                 // Cartel publicitario con imagen del juego (MamVsReptiles)
-                // Crear el banner FUERA del standGroup para posicionarlo correctamente
+                // En la parte frontal de la tribuna, mirando hacia el campo
                 const banner = BABYLON.MeshBuilder.CreatePlane("gameBanner", {
-                    width: 20,
-                    height: 8,
+                    width: 18,
+                    height: 5,
                     sideOrientation: BABYLON.Mesh.DOUBLESIDE
                 }, scene);
-                // Posición absoluta: encima de la tribuna norte, mirando hacia el campo
-                banner.position.set(0, 10, fieldH / 2 + 5);
-                banner.rotation.x = Math.PI * 0.1; // Inclinado ligeramente hacia abajo
+                // Posición: en la cara frontal de la tribuna (Z = fieldH/2 + 3 es el frente de la grada)
+                banner.position.set(0, 3.5, fieldH / 2 + 3);
                 
                 const bannerMat = new BABYLON.StandardMaterial("bannerMat", scene);
                 const bannerTexture = new BABYLON.Texture(
@@ -590,15 +589,6 @@ const Game = () => {
                 bannerMat.emissiveColor = new BABYLON.Color3(1, 1, 1); // Brillo máximo
                 bannerMat.specularColor = new BABYLON.Color3(0, 0, 0);
                 banner.material = bannerMat;
-                
-                // Marco del cartel
-                const frameTop = BABYLON.MeshBuilder.CreateBox("frameTop", { width: 20.4, height: 0.4, depth: 0.3 }, scene);
-                frameTop.position.set(0, 14.2, fieldH / 2 + 5);
-                frameTop.material = grayMat;
-                
-                const frameBottom = BABYLON.MeshBuilder.CreateBox("frameBottom", { width: 20.4, height: 0.4, depth: 0.3 }, scene);
-                frameBottom.position.set(0, 5.8, fieldH / 2 + 5);
-                frameBottom.material = grayMat;
             }
             
             standGroup.position.set(posX, 0, posZ);
