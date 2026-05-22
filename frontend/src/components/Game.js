@@ -13,6 +13,26 @@ import { useControls } from '../hooks/useControls';
 import { useScene } from '../hooks/useScene';
 import { useGameSocket } from '../hooks/useGameSocket';
 
+const MAX_CHAT_MESSAGES = 50;
+
+const syncPlayerMeta = (metaRef, players) => {
+    players.forEach((player) => {
+        if (player?.id) {
+            metaRef.current[player.id] = { ...metaRef.current[player.id], ...player };
+        }
+    });
+};
+
+const syncPlayerMetaFromTeams = (metaRef, teams) => {
+    ['left', 'right'].forEach((side) => {
+        (teams[side] || []).forEach((player) => {
+            if (player?.id) {
+                metaRef.current[player.id] = { ...metaRef.current[player.id], ...player, team: side };
+            }
+        });
+    });
+};
+
 const Game = () => {
     const [searchParams, setSearchParams] = useSearchParams();
 
@@ -142,6 +162,7 @@ const Game = () => {
     const characterManagerRef = useRef(null);
 
     const controlEffectsRef = useRef(null);
+    const playerMetaRef = useRef({});
 
 
     // Añadir detección de dispositivo móvil
@@ -189,6 +210,7 @@ const Game = () => {
         scoreTextRef,
         characterManagerRef,
         controlEffectsRef,
+        playerMetaRef,
         sceneReadyRef,
         isMobileRef,
         setConnectedPlayers,
@@ -209,9 +231,26 @@ const Game = () => {
         onTeamSelected: ({ team }) => {
             setCurrentTeam(team);
             setTeamSelected(true);
+            if (socketRef.current?.id) {
+                playerMetaRef.current[socketRef.current.id] = {
+                    ...playerMetaRef.current[socketRef.current.id],
+                    team,
+                };
+            }
         },
-        onCharacterSelected: ({ characterType }) => setSelectedCharacter(characterType),
-        onTeamUpdate: setTeams,
+        onCharacterSelected: ({ characterType }) => {
+            setSelectedCharacter(characterType);
+            if (socketRef.current?.id) {
+                playerMetaRef.current[socketRef.current.id] = {
+                    ...playerMetaRef.current[socketRef.current.id],
+                    characterType,
+                };
+            }
+        },
+        onTeamUpdate: (teams) => {
+            syncPlayerMetaFromTeams(playerMetaRef, teams);
+            setTeams(teams);
+        },
         onReadyUpdate: setReadyState,
         onGameStart: () => {
             setGameStarted(true);
@@ -259,8 +298,11 @@ const Game = () => {
                 }, 100);
             }
         },
-        onChatUpdate: (message) => setChatMessages((prev) => [...prev, message]),
-        onPlayersListUpdate: setConnectedPlayers,
+        onChatUpdate: (message) => setChatMessages((prev) => [...prev.slice(-(MAX_CHAT_MESSAGES - 1)), message]),
+        onPlayersListUpdate: (list) => {
+            syncPlayerMeta(playerMetaRef, list);
+            setConnectedPlayers(list);
+        },
         onError: (message) => setToast({ message, type: 'error' }),
     };
 
@@ -666,6 +708,7 @@ const Game = () => {
                                     }}
                                     onBallControlChange={(control) => {
                                         if (socketRef.current) {
+                                            // Non-volatile: possession events must reach the server reliably.
                                             socketRef.current.emit('ballControl', { control });
                                         }
                                     }}

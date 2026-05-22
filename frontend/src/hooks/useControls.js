@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useRef } from 'react';
 
-const vectorsApproximatelyEqual = (a, b, epsilon = 0.01) =>
+const KEEPALIVE_MS = 500;
+const MOVEMENT_EMIT_MIN_MS = 50;
+const VECTOR_EPSILON = 0.05;
+
+const vectorsApproximatelyEqual = (a, b, epsilon = VECTOR_EPSILON) =>
   Math.abs(a.x - b.x) < epsilon && Math.abs(a.z - b.z) < epsilon;
 
 /**
@@ -33,9 +37,10 @@ export function useControls({ socketRef, gameStarted, isConnected, chatInputFocu
     const move = length > 0 ? { x: moveX / length, z: moveZ / length } : { x: 0, z: 0 };
 
     const now = performance.now();
+    const vectorChanged = !vectorsApproximatelyEqual(move, lastEmittedMoveRef.current);
     const shouldEmit =
-      !vectorsApproximatelyEqual(move, lastEmittedMoveRef.current) ||
-      now - lastEmitTimeRef.current > 150;
+      (vectorChanged && now - lastEmitTimeRef.current > MOVEMENT_EMIT_MIN_MS) ||
+      now - lastEmitTimeRef.current > KEEPALIVE_MS;
 
     if (shouldEmit) {
       socketRef.current.volatile.emit('playerMove', move);
@@ -93,6 +98,7 @@ export function useControls({ socketRef, gameStarted, isConnected, chatInputFocu
           if (!keysPressed.current.right) { keysPressed.current.right = true; keyChanged = true; }
           break;
         case ' ':
+          // ballControl must stay non-volatile — possession start/end must not be dropped.
           socketRef.current.emit('ballControl', { control: true });
           break;
         default:
@@ -127,6 +133,7 @@ export function useControls({ socketRef, gameStarted, isConnected, chatInputFocu
           if (keysPressed.current.right) { keysPressed.current.right = false; keyChanged = true; }
           break;
         case ' ':
+          // ballControl must stay non-volatile — possession start/end must not be dropped.
           socketRef.current.emit('ballControl', { control: false });
           break;
         default:
@@ -141,17 +148,12 @@ export function useControls({ socketRef, gameStarted, isConnected, chatInputFocu
     window.addEventListener('keydown', handleKeyDown);
     window.addEventListener('keyup', handleKeyUp);
 
-    let rafId = null;
-    const loop = () => {
-      sendMovement();
-      rafId = window.requestAnimationFrame(loop);
-    };
-    rafId = window.requestAnimationFrame(loop);
+    const keepaliveId = setInterval(sendMovement, KEEPALIVE_MS);
 
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
-      if (rafId) window.cancelAnimationFrame(rafId);
+      clearInterval(keepaliveId);
     };
   }, [handleKeyDown, handleKeyUp, sendMovement]);
 

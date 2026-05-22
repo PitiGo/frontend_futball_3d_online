@@ -2,6 +2,15 @@ import * as BABYLON from '@babylonjs/core';
 import * as GUI from '@babylonjs/gui';
 import { getPlayerVisualY } from '../constants/characterStats';
 
+const SNAP_DISTANCE = 3;
+const LERP_ALPHA = 0.15;
+
+function lerpToward(current, target) {
+  const dist = BABYLON.Vector3.Distance(current, target);
+  const alpha = dist > SNAP_DISTANCE ? 1.0 : LERP_ALPHA;
+  return BABYLON.Vector3.Lerp(current, target, alpha);
+}
+
 export function createUpdateGameState(refs) {
   const {
     sceneReadyRef,
@@ -15,6 +24,7 @@ export function createUpdateGameState(refs) {
     controlEffectsRef,
     socketRef,
     sceneRef,
+    playerMetaRef,
     setConnectedPlayers,
   } = refs;
 
@@ -39,17 +49,22 @@ export function createUpdateGameState(refs) {
 
         if (!playersRef.current[playerData.id]) {
           try {
+            const meta = playerMetaRef.current[playerData.id] || {};
+            const characterType = playerData.characterType || meta.characterType || 'player';
+            const team = playerData.team || meta.team;
+            const name = playerData.name || meta.name || '';
+
             const playerInstance = await characterManagerRef.current.createPlayerInstance(
               playerData.id,
-              playerData.characterType || 'player',
-              playerData.team,
+              characterType,
+              team,
             );
             playersRef.current[playerData.id] = playerInstance;
 
             const playerLabel = new GUI.Rectangle(`label-${playerData.id}`);
             playerLabel.width = isMobileView ? '80px' : '120px';
             playerLabel.height = isMobileView ? '20px' : '30px';
-            playerLabel.background = playerData.team === 'left'
+            playerLabel.background = team === 'left'
               ? 'rgba(59, 130, 246, 0.8)'
               : 'rgba(239, 68, 68, 0.8)';
             playerLabel.cornerRadius = isMobileView ? 10 : 15;
@@ -60,7 +75,7 @@ export function createUpdateGameState(refs) {
             advancedTextureRef.current.addControl(playerLabel);
 
             const nameText = new GUI.TextBlock();
-            nameText.text = playerData.name;
+            nameText.text = name;
             nameText.color = 'white';
             nameText.fontSize = isMobileView ? 10 : 14;
             nameText.fontWeight = 'bold';
@@ -83,7 +98,9 @@ export function createUpdateGameState(refs) {
 
         const playerInstance = playersRef.current[playerData.id];
         if (playerInstance) {
-          const visualY = getPlayerVisualY(playerData.characterType);
+          const meta = playerMetaRef.current[playerData.id] || {};
+          const characterType = playerData.characterType || meta.characterType;
+          const visualY = getPlayerVisualY(characterType);
           const currentPosition = playerInstance.position;
           const targetPosition = new BABYLON.Vector3(
             playerData.position.x,
@@ -91,7 +108,7 @@ export function createUpdateGameState(refs) {
             playerData.position.z,
           );
 
-          playerInstance.position = BABYLON.Vector3.Lerp(currentPosition, targetPosition, 0.3);
+          playerInstance.position = lerpToward(currentPosition, targetPosition);
 
           const deltaX = targetPosition.x - currentPosition.x;
           const deltaZ = targetPosition.z - currentPosition.z;
@@ -116,6 +133,7 @@ export function createUpdateGameState(refs) {
           try {
             characterManagerRef.current.removePlayer(id);
             delete playersRef.current[id];
+            delete playerMetaRef.current[id];
             if (playersLabelsRef.current[id]) {
               playersLabelsRef.current[id].dispose();
               delete playersLabelsRef.current[id];
@@ -140,7 +158,7 @@ export function createUpdateGameState(refs) {
       if (speed > 0.01) {
         ballRef.current.rotate(rotationAxis, speed * 8, BABYLON.Space.WORLD);
       }
-      ballRef.current.position = BABYLON.Vector3.Lerp(currentPosition, targetPosition, 0.3);
+      ballRef.current.position = lerpToward(currentPosition, targetPosition);
     }
 
     if (scoreTextRef.current && score) {
@@ -150,7 +168,7 @@ export function createUpdateGameState(refs) {
 
     if (controlEffectsRef.current && ballRef.current) {
       const hasControl = !!controllingPlayerId && controlRemainingMs > 0;
-      const controllingPlayer = players?.find((p) => p.id === controllingPlayerId);
+      const controllingName = playerMetaRef.current[controllingPlayerId]?.name || '';
       controlEffectsRef.current.ballHalo.isVisible = hasControl;
       controlEffectsRef.current.controlRing.isVisible = hasControl;
       controlEffectsRef.current.controlTimeText.isVisible = hasControl;
@@ -162,7 +180,7 @@ export function createUpdateGameState(refs) {
           controlEffectsRef.current.controlRing.position.y = 0.1;
         }
         const seconds = Math.ceil(controlRemainingMs / 100) / 10;
-        controlEffectsRef.current.controlPlayerNameText.text = controllingPlayer?.name || '';
+        controlEffectsRef.current.controlPlayerNameText.text = controllingName;
         controlEffectsRef.current.controlTimeText.text = `${seconds.toFixed(1)}s`;
         controlEffectsRef.current.controlPlayerNameText.top = isMobileView ? '20px' : '0px';
         controlEffectsRef.current.controlTimeText.top = isMobileView ? '40px' : '20px';

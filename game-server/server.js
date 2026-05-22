@@ -681,16 +681,12 @@ function updateGamePhysics(roomId, state) {
 // --- Emisión de Estado ---
 function emitGameState(roomId, state) {
   // Crear payload solo con datos necesarios para el cliente
+  // Static fields (name, team, characterType) are sent via teamUpdate / playersListUpdate.
   const playersData = Array.from(state.players.values()).map(p => ({
     id: p.id,
-    name: p.name,
-    team: p.team,
-    characterType: p.characterType,
     position: vector3ToObject(p.position),
-    rotation: quaternionToObject(p.rotation),
     isMoving: state.playerMovements.get(p.id)?.moveDirection.lengthSquared() > 0.01,
     isControllingBall: p.isControllingBall,
-    // ready: p.ready // Podría ser útil para la UI
   }));
 
   // Calcular jugador que controla y tiempo restante
@@ -707,9 +703,8 @@ function emitGameState(roomId, state) {
     players: playersData,
     ballPosition: vector3ToObject(state.ballPosition),
     score: state.score,
-    currentState: state.currentGameState, // Enviar estado para UI cliente
     controllingPlayerId,
-    controlRemainingMs
+    controlRemainingMs,
   };
 
   // Emitir a la sala específica
