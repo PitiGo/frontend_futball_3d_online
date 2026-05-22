@@ -10,6 +10,8 @@ import {
   getCharacterStats,
   resolveBallGoalPostCollisions,
   isBallInGoal,
+  findPassAssistDirection,
+  stepPlayerVelocityXZ,
   FIELD_WIDTH,
   FIELD_HEIGHT,
   GOAL_Z_MIN,
@@ -482,8 +484,11 @@ function updateGamePhysics(roomId, state) {
       return;
     }
 
-    // Aplicar velocidad instantánea basada en input (más responsivo)
-    player.velocity.copyFrom(movement.moveDirection).scaleInPlace(PLAYER_SPEED * stats.speedMultiplier);
+    // Aceleración / frenado suave hacia la velocidad objetivo (inercia arcade)
+    const maxSpeed = PLAYER_SPEED * stats.speedMultiplier;
+    const targetX = movement.moveDirection.x * maxSpeed;
+    const targetZ = movement.moveDirection.z * maxSpeed;
+    stepPlayerVelocityXZ(player.velocity, targetX, targetZ, PHYSICS_DT);
 
     // Integración de Euler simple
     player.position.addInPlace(player.velocity.scale(PHYSICS_DT));
@@ -501,8 +506,12 @@ function updateGamePhysics(roomId, state) {
     }
     player.position.y = playerRadius; // Mantener en el suelo
 
-    // Rotación (Mirar en la dirección del movimiento)
-    if (movement.moveDirection.lengthSquared() > 0.01) { // Usar input para rotación más directa
+    // Rotación: seguir velocidad real cuando se mueve; input cuando arranca
+    const horizSpeedSq = player.velocity.x * player.velocity.x + player.velocity.z * player.velocity.z;
+    if (horizSpeedSq > 0.05) {
+      const angle = Math.atan2(player.velocity.x, player.velocity.z);
+      Quaternion.FromEulerAnglesToRef(0, angle, 0, player.rotation);
+    } else if (movement.moveDirection.lengthSquared() > 0.01) {
       const angle = Math.atan2(movement.moveDirection.x, movement.moveDirection.z);
       Quaternion.FromEulerAnglesToRef(0, angle, 0, player.rotation);
     }
@@ -951,7 +960,9 @@ io.on('connection', (socket) => {
     if (control === true) {
       const stats = getCharacterStats(player.characterType);
       const controlRadius = stats.controlRadius || BALL_CONTROL_RADIUS;
-      const distSq = state.ballPosition.subtract(player.position).lengthSquared();
+      const toBall = state.ballPosition.subtract(player.position);
+      toBall.y = 0;
+      const distSq = toBall.lengthSquared();
       const controlRadiusSq = controlRadius * controlRadius;
       let alreadyControlled = false;
       state.players.forEach(p => { if (p.isControllingBall) alreadyControlled = true; });
@@ -983,6 +994,17 @@ io.on('connection', (socket) => {
         }
         worldForward.y = 0;
         if (worldForward.lengthSquared() > 0.001) worldForward.normalize();
+
+        const assisted = findPassAssistDirection(
+          player.id,
+          player.team,
+          player.position,
+          { x: worldForward.x, z: worldForward.z },
+          Array.from(state.players.values()),
+        );
+        worldForward.x = assisted.x;
+        worldForward.z = assisted.z;
+        worldForward.y = 0;
 
         // Calculate shot speed
         const nowTs = performance.now();

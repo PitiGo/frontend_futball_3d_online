@@ -5,6 +5,8 @@ import {
   resolveBallGoalPostCollisions,
   isBallInGoal,
   getCharacterStats,
+  findPassAssistDirection,
+  stepPlayerVelocityXZ,
   FIELD_WIDTH,
   BALL_RADIUS,
 } from './collisions.js';
@@ -36,4 +38,41 @@ test('isBallInGoal detects scoring position', () => {
 test('getCharacterStats falls back to player defaults', () => {
   const stats = getCharacterStats('unknown');
   assert.equal(stats.speedMultiplier, getCharacterStats('player').speedMultiplier);
+});
+
+test('findPassAssistDirection blends toward teammate in cone', () => {
+  const dir = findPassAssistDirection(
+    'a',
+    'left',
+    { x: 0, y: 0, z: 0 },
+    { x: 1, z: 0 },
+    [
+      { id: 'a', team: 'left', position: { x: 0, y: 0.5, z: 0 } },
+      { id: 'b', team: 'left', position: { x: 10, y: 0.5, z: 1 } },
+    ],
+  );
+  assert.ok(dir.x > 0.95);
+  assert.ok(dir.z > 0);
+});
+
+test('findPassAssistDirection ignores opponents', () => {
+  const dir = findPassAssistDirection(
+    'a',
+    'left',
+    { x: 0, y: 0, z: 0 },
+    { x: 1, z: 0 },
+    [
+      { id: 'a', team: 'left', position: { x: 0, y: 0.5, z: 0 } },
+      { id: 'x', team: 'right', position: { x: 10, y: 0.5, z: 0 } },
+    ],
+  );
+  assert.equal(dir.x, 1);
+  assert.equal(dir.z, 0);
+});
+
+test('stepPlayerVelocityXZ eases toward target speed', () => {
+  const vel = { x: 0, y: 0, z: 0 };
+  stepPlayerVelocityXZ(vel, 5, 0, 1 / 60);
+  assert.ok(vel.x > 0 && vel.x < 5);
+  assert.equal(vel.y, 0);
 });
