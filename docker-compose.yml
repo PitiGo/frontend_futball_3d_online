@@ -5,7 +5,9 @@ services:
       - "3000:3000"
     environment:
       - NODE_ENV=production
-      - REACT_APP_BASE_URL=https://football-online-3d.dantecollazzi.com
+      - REACT_APP_GAME_SERVER_URL=https://football-online-3d.dantecollazzi.com
+      - REACT_APP_ROOMS=1,2
+      - REACT_APP_ROOM_PREFIX=room
     networks:
       - game-network
 

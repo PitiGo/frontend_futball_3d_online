@@ -5,12 +5,10 @@
   "dependencies": {
     "@babylonjs/core": "^7.29.0",
     "@babylonjs/gui": "^7.29.0",
-    "@babylonjs/inspector": "^7.30.0",
     "@babylonjs/loaders": "^7.29.0",
     "@testing-library/jest-dom": "^5.17.0",
     "@testing-library/react": "^13.4.0",
     "@testing-library/user-event": "^13.5.0",
-    "cannon": "^0.6.2",
     "cannon-es": "^0.20.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",

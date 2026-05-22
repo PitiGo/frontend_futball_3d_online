@@ -39,20 +39,12 @@ const MobileGameLayout = ({
       {/* Joystick virtual */}
       <MobileJoystick onDirectionChange={onDirectionChange} />
 
-      {/* Chat móvil */}
+      {/* Chat móvil — toggle integrado en ChatMobile */}
       <ChatMobile 
         messages={chatMessages}
         onSend={onChatSend}
         teams={teams}
       />
-
-      {/* Botón minimizar chat */}
-      <button 
-        className="fixed top-2 right-2 bg-black bg-opacity-60 text-white text-xs p-2 rounded-lg"
-        onClick={() => setChatVisible(!chatVisible)}
-      >
-        Chat
-      </button>
     </div>
   );
 };

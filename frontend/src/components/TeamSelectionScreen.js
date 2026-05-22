@@ -1,5 +1,44 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useTranslation } from '../i18n/LanguageContext';
+
+const CharacterThumbnail = ({ characterId, teamColor }) => {
+  const [failed, setFailed] = useState(false);
+
+  if (failed) {
+    return (
+      <div style={{
+        width: '100%',
+        height: '200px',
+        backgroundColor: '#e5e7eb',
+        borderRadius: '8px',
+        marginBottom: '1rem',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        color: '#6b7280',
+        fontSize: '0.9rem',
+      }}>
+        ?
+      </div>
+    );
+  }
+
+  return (
+    <img
+      src={`/thumbnails/${characterId}.png`}
+      alt={characterId}
+      onError={() => setFailed(true)}
+      style={{
+        width: '100%',
+        height: '200px',
+        objectFit: 'cover',
+        borderRadius: '8px',
+        marginBottom: '1rem',
+        backgroundColor: '#e5e7eb',
+      }}
+    />
+  );
+};
 
 const TeamSelectionScreen = ({
   onTeamSelect,
@@ -102,7 +141,6 @@ const TeamSelectionScreen = ({
     return null;
   };
 
-  const playerTeam = getPlayerTeam();
   const playerId = getCurrentPlayerId();
 
   const getTeamName = (team) => team === 'left' ? t('teamSelection.mammals') : t('teamSelection.reptiles');
@@ -427,16 +465,7 @@ const TeamSelectionScreen = ({
                         textAlign: 'center',
                       }}
                     >
-                      <div style={{
-                        width: '100%',
-                        height: '200px',
-                        backgroundColor: '#e5e7eb',
-                        borderRadius: '8px',
-                        marginBottom: '1rem',
-                        backgroundImage: `url(/thumbnails/${character.id}.png)`,
-                        backgroundSize: 'cover',
-                        backgroundPosition: 'center',
-                      }} />
+                      <CharacterThumbnail characterId={character.id} teamColor={getTeamColor(currentTeam)} />
                       <h3 style={{
                         fontSize: '1.25rem',
                         fontWeight: 'bold',

@@ -6,6 +6,17 @@ import { Server } from 'socket.io';
 import { Vector3, Quaternion, Matrix } from '@babylonjs/core'; // Añadir Matrix
 import cors from 'cors';
 import { performance } from 'perf_hooks'; // Para performance.now() en Node.js
+import {
+  getCharacterStats,
+  resolveBallGoalPostCollisions,
+  isBallInGoal,
+  FIELD_WIDTH,
+  FIELD_HEIGHT,
+  GOAL_Z_MIN,
+  GOAL_Z_MAX,
+  GOAL_NET_DEPTH,
+  BALL_RADIUS,
+} from './physics/collisions.js';
 
 const app = express();
 
@@ -55,29 +66,25 @@ const io = new Server(httpServer, {
 
 // --- Constantes del Juego (parametrizables) ---
 const availableSalas = parseEnvList('ROOMS', ['room1', 'room2']);
-const FIELD_WIDTH = 40;
-const FIELD_HEIGHT = 30;
-const BALL_RADIUS = 0.5;
 const PLAYER_RADIUS = 0.5;
 const PLAYER_SPEED = 5; // Velocidad base (unidades por segundo) - Reference: Player moves at 5 u/s
-const GOAL_DEPTH = 7;
-const GOAL_Z_MIN = -GOAL_DEPTH / 2;
-const GOAL_Z_MAX = GOAL_DEPTH / 2;
-const GOAL_NET_DEPTH = 2.5; // Nueva constante: Profundidad hacia atrás de la portería
 const BALL_MASS = 0.45;
 const PLAYER_MASS = 75; // Masa real
 const INV_BALL_MASS = 1 / BALL_MASS;
 const INV_PLAYER_MASS = 1 / PLAYER_MASS;
-const FRICTION = 0.994; // Coeficiente de fricción por tick (ajustado a DT) - Low friction to maintain speed
+const FRICTION = 0.98; // Arcade feel: less sliding on the pitch
 const RESTITUTION = 0.6; // Coeficiente de restitución (elasticidad)
 const MAX_PLAYERS_PER_TEAM = 3;
 const GOALS_TO_WIN = 3;
 const BALL_CONTROL_RADIUS = 1.5;
-const BALL_RELEASE_BOOST = 10; // Deprecated (mantener compat)
-const BALL_RELEASE_MIN = 30;    // Minimum shot speed: 30 u/s (6x faster than player) - Quick tap
-const BALL_RELEASE_MAX = 60;   // Maximum shot speed: 60 u/s (12x faster than player) - Full charge
+const BALL_RELEASE_MIN = 25; // Minimum shot speed (quick tap)
+const BALL_RELEASE_MAX = 50; // Maximum shot speed (full charge)
 const PHYSICS_TICK_RATE = 60; // Hz
+const STATE_EMIT_RATE = 20; // Hz — physics at 60, network at 20
+const EMIT_EVERY_N_TICKS = PHYSICS_TICK_RATE / STATE_EMIT_RATE;
 const PHYSICS_DT = 1 / PHYSICS_TICK_RATE; // Delta time para física
+const KICKOFF_FREEZE_MS = 2000;
+const RECONNECT_GRACE_MS = 30000;
 
 const TEAM_CHARACTERS = {
   left: ['player', 'pig'],
@@ -115,7 +122,10 @@ availableSalas.forEach(roomId => {
     gameOverTimeout: null,   // ID del temporizador para reiniciar tras game over
     gameOverData: null,     // Datos del resultado final
     gameLoopInterval: null, // ID del intervalo del bucle principal
-    playerMovements: new Map() // Mapa de socket.id -> { moveDirection: Vector3 }
+    playerMovements: new Map(), // Mapa de socket.id -> { moveDirection: Vector3 }
+    physicsTickCount: 0,
+    kickoffFrozenUntil: 0,
+    disconnectedSessions: new Map(), // sessionId -> { name, team, characterType, ready, disconnectedAt }
   };
 });
 
@@ -190,8 +200,9 @@ function resetPlayersPositions(roomId, state) {
       state.playerMovements.get(player.id).moveDirection.set(0, 0, 0);
     }
   });
-  // Emitir estado para que el cliente vea las nuevas posiciones inmediatamente
-  emitGameState(roomId, state);
+  if (state.players.size > 0) {
+    emitGameState(roomId, state);
+  }
 }
 
 
@@ -268,12 +279,16 @@ function startGame(roomId, state) {
   // Iniciar el bucle de física/juego si no está corriendo
   if (!state.gameLoopInterval) {
     state.lastUpdateTime = performance.now();
+    state.physicsTickCount = 0;
+    state.kickoffFrozenUntil = performance.now() + KICKOFF_FREEZE_MS;
     state.gameLoopInterval = setInterval(() => {
-      // Separar lógica de física y emisión
       updateGamePhysics(roomId, state);
-      emitGameState(roomId, state);
+      state.physicsTickCount += 1;
+      if (state.physicsTickCount % EMIT_EVERY_N_TICKS === 0) {
+        emitGameState(roomId, state);
+      }
     }, 1000 / PHYSICS_TICK_RATE);
-    console.log(`[${roomId}] Bucle de juego iniciado para ${roomId}.`);
+    console.log(`[${roomId}] Bucle de juego iniciado (${PHYSICS_TICK_RATE}Hz física, ${STATE_EMIT_RATE}Hz red).`);
   }
 }
 
@@ -415,7 +430,8 @@ function handleGoal(roomId, state, scoringTeam) {
       resetBall(state);
       resetPlayersPositions(roomId, state); // Pasar roomId
       state.currentGameState = gameStates.PLAYING; // Reanudar juego
-      io.to(roomId).emit('gameStateInfo', { currentState: state.currentGameState }); // Notificar reanudación
+      state.kickoffFrozenUntil = performance.now() + KICKOFF_FREEZE_MS;
+      io.to(roomId).emit('gameStateInfo', { currentState: state.currentGameState, kickoffInMs: KICKOFF_FREEZE_MS }); // Notificar reanudación
       state.goalScoredTimeout = null;
     } else {
       console.log(`[${roomId}] Reinicio cancelado, estado del juego ya es ${state.currentGameState}`);
@@ -449,30 +465,40 @@ function updateGamePhysics(roomId, state) {
     return; // No actualizar física si no se está jugando activamente
   }
 
+  const kickoffFrozen = performance.now() < state.kickoffFrozenUntil;
+
   // 1. Actualizar Jugadores
   state.players.forEach(player => {
     const movement = state.playerMovements.get(player.id);
     if (!movement || !player.team) return;
 
+    const stats = getCharacterStats(player.characterType);
+    const playerRadius = stats.radius || PLAYER_RADIUS;
+
+    if (kickoffFrozen) {
+      player.velocity.set(0, 0, 0);
+      player.position.y = playerRadius;
+      return;
+    }
+
     // Aplicar velocidad instantánea basada en input (más responsivo)
-    // Podríamos añadir aceleración/inercia si quisiéramos
-    player.velocity.copyFrom(movement.moveDirection).scaleInPlace(PLAYER_SPEED);
+    player.velocity.copyFrom(movement.moveDirection).scaleInPlace(PLAYER_SPEED * stats.speedMultiplier);
 
     // Integración de Euler simple
     player.position.addInPlace(player.velocity.scale(PHYSICS_DT));
 
     // Colisiones con bordes
-    if (player.position.x < -FIELD_WIDTH / 2 + PLAYER_RADIUS) {
-      player.position.x = -FIELD_WIDTH / 2 + PLAYER_RADIUS; player.velocity.x = 0;
-    } else if (player.position.x > FIELD_WIDTH / 2 - PLAYER_RADIUS) {
-      player.position.x = FIELD_WIDTH / 2 - PLAYER_RADIUS; player.velocity.x = 0;
+    if (player.position.x < -FIELD_WIDTH / 2 + playerRadius) {
+      player.position.x = -FIELD_WIDTH / 2 + playerRadius; player.velocity.x = 0;
+    } else if (player.position.x > FIELD_WIDTH / 2 - playerRadius) {
+      player.position.x = FIELD_WIDTH / 2 - playerRadius; player.velocity.x = 0;
     }
-    if (player.position.z < -FIELD_HEIGHT / 2 + PLAYER_RADIUS) {
-      player.position.z = -FIELD_HEIGHT / 2 + PLAYER_RADIUS; player.velocity.z = 0;
-    } else if (player.position.z > FIELD_HEIGHT / 2 - PLAYER_RADIUS) {
-      player.position.z = FIELD_HEIGHT / 2 - PLAYER_RADIUS; player.velocity.z = 0;
+    if (player.position.z < -FIELD_HEIGHT / 2 + playerRadius) {
+      player.position.z = -FIELD_HEIGHT / 2 + playerRadius; player.velocity.z = 0;
+    } else if (player.position.z > FIELD_HEIGHT / 2 - playerRadius) {
+      player.position.z = FIELD_HEIGHT / 2 - playerRadius; player.velocity.z = 0;
     }
-    player.position.y = PLAYER_RADIUS; // Mantener en el suelo
+    player.position.y = playerRadius; // Mantener en el suelo
 
     // Rotación (Mirar en la dirección del movimiento)
     if (movement.moveDirection.lengthSquared() > 0.01) { // Usar input para rotación más directa
@@ -482,6 +508,12 @@ function updateGamePhysics(roomId, state) {
   });
 
   // 2. Actualizar Pelota
+  if (kickoffFrozen) {
+    state.ballVelocity.set(0, 0, 0);
+    state.ballPosition.y = BALL_RADIUS;
+    return;
+  }
+
   // Aplicar fricción (excepto inmediatamente después de un disparo)
   const nowMs = performance.now();
   const inShotWindow = (nowMs - state.ballLastShotTime) < state.ballFrictionCooldownMs;
@@ -492,15 +524,14 @@ function updateGamePhysics(roomId, state) {
   // Integración de Euler
   state.ballPosition.addInPlace(state.ballVelocity.scale(PHYSICS_DT));
 
+  // Colisiones con postes de portería (autoritativas, alineadas con el cliente)
+  resolveBallGoalPostCollisions(state.ballPosition, state.ballVelocity, RESTITUTION);
+
   // Colisiones con bordes y Goles
   let scored = false;
   if (Math.abs(state.ballPosition.x) >= FIELD_WIDTH / 2 - BALL_RADIUS) {
-    
-    // Verificar si está dentro del ancho de la portería (Eje Z) y altura (Eje Y)
-    const inGoalWidth = state.ballPosition.z >= GOAL_Z_MIN && state.ballPosition.z <= GOAL_Z_MAX;
-    const inGoalHeight = state.ballPosition.y < 3; // Altura del travesaño
-    
-    if (inGoalWidth && inGoalHeight) {
+
+    if (isBallInGoal(state.ballPosition)) {
       // ESTÁ DENTRO DE LA PORTERÍA
       
       // 1. Detectar Gol si no se ha marcado aún
@@ -557,9 +588,13 @@ function updateGamePhysics(roomId, state) {
   state.players.forEach(player => {
     if (!player.team) return;
 
+    const stats = getCharacterStats(player.characterType);
+    const playerRadius = stats.radius || PLAYER_RADIUS;
+    const controlRadius = stats.controlRadius || BALL_CONTROL_RADIUS;
+
     const vecToBall = state.ballPosition.subtract(player.position);
     const distSq = vecToBall.lengthSquared();
-    const combinedRadius = PLAYER_RADIUS + BALL_RADIUS;
+    const combinedRadius = playerRadius + BALL_RADIUS;
     const combinedRadiusSq = combinedRadius * combinedRadius;
 
     // Lógica de Control Activo
@@ -629,7 +664,7 @@ function updateGamePhysics(roomId, state) {
   });
 
   // 4. Limitar Velocidades y Detener Pelota
-  const maxBallSpeedSq = 65 * 65; // Maximum speed limit - Must be greater than BALL_RELEASE_MAX (60)
+  const maxBallSpeedSq = 55 * 55; // Must exceed BALL_RELEASE_MAX (50)
   if (state.ballVelocity.lengthSquared() > maxBallSpeedSq) {
     state.ballVelocity.normalize().scaleInPlace(Math.sqrt(maxBallSpeedSq));
   }
@@ -688,7 +723,7 @@ io.on('connection', (socket) => {
   let currentRoomId = null; // ID de la sala para este socket
 
   // Handler 'joinGame'
-  socket.on('joinGame', ({ name, roomId }) => {
+  socket.on('joinGame', ({ name, roomId, sessionId }) => {
     console.log(`[${roomId || 'N/A'}] -> joinGame de ${socket.id} (${name})`);
 
     // Validaciones
@@ -706,9 +741,59 @@ io.on('connection', (socket) => {
       console.error(`[${roomId}] Error joinGame: Nombre inválido.`);
       return socket.emit('joinError', { message: 'Nombre inválido o vacío.' });
     }
+
+    // Reconexión: restaurar sesión si el jugador volvió dentro del periodo de gracia
+    if (sessionId && state.disconnectedSessions.has(sessionId)) {
+      const ghost = state.disconnectedSessions.get(sessionId);
+      if (performance.now() - ghost.disconnectedAt < RECONNECT_GRACE_MS && ghost.name === sanitizedName) {
+        state.disconnectedSessions.delete(sessionId);
+        socket.join(roomId);
+        currentRoomId = roomId;
+
+        const playerData = {
+          id: socket.id,
+          name: sanitizedName,
+          team: ghost.team,
+          characterType: ghost.characterType,
+          position: ghost.team ? getSpawnPosition(ghost.team) : new Vector3(0, PLAYER_RADIUS, 0),
+          rotation: new Quaternion(0, 0, 0, 1),
+          velocity: new Vector3(0, 0, 0),
+          ready: false,
+          isControllingBall: false,
+          ballControlTime: 0,
+          lastKickTime: 0,
+          sessionId,
+          roomId,
+        };
+        state.players.set(socket.id, playerData);
+        state.playerMovements.set(socket.id, { moveDirection: Vector3.Zero() });
+        if (ghost.team) {
+          state.teams[ghost.team].add(socket.id);
+        }
+
+        socket.emit('gameJoined', { id: socket.id, name: sanitizedName, roomId, reconnected: true });
+        if (ghost.team) socket.emit('teamSelected', { team: ghost.team });
+        if (ghost.characterType) socket.emit('characterSelected', { characterType: ghost.characterType });
+        const status = getTeamStatus(state);
+        socket.emit('teamUpdate', status.teams);
+        socket.emit('readyUpdate', getReadyPayload(state));
+        socket.emit('gameStateInfo', { currentState: state.currentGameState, score: state.score });
+        io.to(roomId).emit('playersListUpdate', Array.from(state.players.values()).map(p => ({
+          id: p.id, name: p.name, team: p.team, characterType: p.characterType
+        })));
+        emitGameState(roomId, state);
+        console.log(`[${roomId}] Sesión ${sessionId} restaurada para ${sanitizedName}.`);
+        return;
+      }
+      state.disconnectedSessions.delete(sessionId);
+    }
+
     // Evitar unirse si el nombre ya está en uso en esa sala
     let nameExists = false;
     state.players.forEach(p => { if (p.name === sanitizedName) nameExists = true; });
+    state.disconnectedSessions.forEach(ghost => {
+      if (ghost.name === sanitizedName) nameExists = true;
+    });
     if (nameExists) {
       console.error(`[${roomId}] Error joinGame: Nombre "${sanitizedName}" ya en uso.`);
       return socket.emit('joinError', { message: `El nombre "${sanitizedName}" ya está en uso.` });
@@ -744,6 +829,7 @@ io.on('connection', (socket) => {
       isControllingBall: false,
       ballControlTime: 0,
       lastKickTime: 0, // To avoid immediate collision after shot
+      sessionId: sessionId || null,
       roomId: roomId // Referencia a su sala
     };
     state.players.set(socket.id, playerData);
@@ -919,9 +1005,10 @@ io.on('connection', (socket) => {
     //console.log(`[${currentRoomId}] -> ballControl de ${player.name}. Control: ${control}`);
 
     if (control === true) {
-      // Intenta tomar control
+      const stats = getCharacterStats(player.characterType);
+      const controlRadius = stats.controlRadius || BALL_CONTROL_RADIUS;
       const distSq = state.ballPosition.subtract(player.position).lengthSquared();
-      const controlRadiusSq = BALL_CONTROL_RADIUS * BALL_CONTROL_RADIUS;
+      const controlRadiusSq = controlRadius * controlRadius;
       let alreadyControlled = false;
       state.players.forEach(p => { if (p.isControllingBall) alreadyControlled = true; });
 
@@ -955,11 +1042,8 @@ io.on('connection', (socket) => {
         const nowTs = performance.now();
         const controlHeldSec = Math.min(3, Math.max(0, (nowTs - player.ballControlTime) / 1000));
         const t = controlHeldSec / 3; // 0..1
-        
-        // Reduced shot speeds for better control
-        const MIN_SPEED = 15; // Minimum speed (quick tap) - reduced from 30
-        const MAX_SPEED = 35; // Maximum speed (full 3s charge) - reduced from 60
-        const speed = MIN_SPEED + (MAX_SPEED - MIN_SPEED) * t;
+        const stats = getCharacterStats(player.characterType);
+        const speed = (BALL_RELEASE_MIN + (BALL_RELEASE_MAX - BALL_RELEASE_MIN) * t) * stats.shotMultiplier;
 
         // Assign velocity
         state.ballVelocity = worldForward.scale(speed);
@@ -967,7 +1051,7 @@ io.on('connection', (socket) => {
 
         // KEY CHANGE: Aggressive separation
         // Push ball 0.8 units (before 0.1) to ensure it doesn't touch the body
-        const separationDist = PLAYER_RADIUS + BALL_RADIUS + 0.8;
+        const separationDist = (getCharacterStats(player.characterType).radius || PLAYER_RADIUS) + BALL_RADIUS + 0.8;
         state.ballPosition.addInPlace(worldForward.clone().scale(separationDist));
 
         // KEY CHANGE: Register kick time
@@ -1011,6 +1095,23 @@ io.on('connection', (socket) => {
 
     if (player) {
       console.log(`[${currentRoomId}] Limpiando jugador ${player.name} (${socket.id}) por desconexión.`);
+
+      if (player.sessionId) {
+        state.disconnectedSessions.set(player.sessionId, {
+          name: player.name,
+          team: player.team,
+          characterType: player.characterType,
+          disconnectedAt: performance.now(),
+        });
+        setTimeout(() => {
+          if (state.disconnectedSessions.get(player.sessionId)?.disconnectedAt) {
+            const entry = state.disconnectedSessions.get(player.sessionId);
+            if (entry && performance.now() - entry.disconnectedAt >= RECONNECT_GRACE_MS) {
+              state.disconnectedSessions.delete(player.sessionId);
+            }
+          }
+        }, RECONNECT_GRACE_MS + 100);
+      }
 
       // Quitar de equipos y estado 'listo'
       if (player.team) {
