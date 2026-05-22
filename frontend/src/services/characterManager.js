@@ -1,5 +1,6 @@
 // characterManager.js
 import * as BABYLON from '@babylonjs/core';
+import '@babylonjs/loaders/glTF';
 
 class CharacterManager {
     constructor(scene) {
