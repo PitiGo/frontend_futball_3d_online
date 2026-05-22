@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useTranslation } from '../i18n/LanguageContext';
+import CharacterStats from './CharacterStats';
 
 const CharacterThumbnail = ({ characterId, teamColor }) => {
   const [failed, setFailed] = useState(false);
@@ -481,6 +482,7 @@ const TeamSelectionScreen = ({
                       }}>
                         {character.description}
                       </p>
+                      <CharacterStats characterId={character.id} teamColor={getTeamColor(currentTeam)} />
                     </div>
                   ))}
                 </div>

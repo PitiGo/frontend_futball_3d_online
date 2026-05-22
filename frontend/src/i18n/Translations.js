@@ -69,7 +69,12 @@ const translations = {
       waitingPlayers: "⌛ Waiting for all players to be ready...",
       selectTeamContinue: "👈 Select a team to continue",
       selectCharacterPrompt: "👆 Select a character for",
-      pressReady: "✨ Press READY when you're ready!"
+      pressReady: "✨ Press READY when you're ready!",
+      stats: {
+        speed: "Speed",
+        control: "Ball control",
+        shot: "Shot power",
+      },
     },
 
     // Game UI
@@ -165,7 +170,12 @@ const translations = {
       waitingPlayers: "⌛ Esperando a que todos los jugadores estén listos...",
       selectTeamContinue: "👈 Selecciona un equipo para continuar",
       selectCharacterPrompt: "👆 Selecciona un personaje para el",
-      pressReady: "✨ ¡Pulsa COMENZAR cuando estés listo!"
+      pressReady: "✨ ¡Pulsa COMENZAR cuando estés listo!",
+      stats: {
+        speed: "Velocidad",
+        control: "Control",
+        shot: "Disparo",
+      },
     },
 
     // Interfaz del juego

@@ -156,8 +156,9 @@ app.get('/:roomId/status', (req, res) => {
 // --- Funciones de Utilidad ---
 function sanitizeInput(input, maxLength = 200) {
   if (typeof input !== 'string') return '';
-  // Simple sanitization, considera librerías más robustas para producción
-  return input.replace(/</g, "<").replace(/>/g, ">").trim().slice(0, maxLength);
+  // Escapa < y > para nombres/chat. React escapa el DOM por defecto; no usamos dangerouslySetInnerHTML.
+  // Para HTML arbitrario en chat, considerar reintroducir sanitize-html.
+  return input.replace(/[<>]/g, '').trim().slice(0, maxLength);
 }
 
 function vector3ToObject(v) { return v ? { x: v.x, y: v.y, z: v.z } : { x: 0, y: 0, z: 0 }; }
