@@ -19,17 +19,6 @@ import { useControls } from '../hooks/useControls';
 
 const BALL_CONTROL_RADIUS = 1.5;
 
-const getSessionId = () => {
-    const key = 'football3d_session';
-    let id = localStorage.getItem(key);
-    if (!id) {
-        id = crypto.randomUUID();
-        localStorage.setItem(key, id);
-    }
-    return id;
-};
-
-
 const Game = () => {
     const [searchParams, setSearchParams] = useSearchParams();
 
@@ -1429,11 +1418,7 @@ const Game = () => {
     }, []);
 
     const handleJoinGame = (name) => {
-        socketRef.current.emit('joinGame', {
-            name: name.trim(),
-            roomId,
-            sessionId: getSessionId(),
-        });
+        socketRef.current.emit('joinGame', { name: name.trim(), roomId });
         setPlayerName(name);
         setHasJoined(true);
     };
@@ -1602,13 +1587,9 @@ const Game = () => {
         const handleConnect = () => {
             console.log('>>> Socket conectado:', socket.id);
             setIsConnected(true);
-            if (hasJoined && playerName && roomId) {
+            if (hasJoined && playerName) {
                 console.log("Emitiendo joinGame al (re)conectar.");
-                socket.emit('joinGame', {
-                    name: playerName,
-                    roomId,
-                    sessionId: getSessionId(),
-                });
+                socket.emit('joinGame', { name: playerName });
             }
         };
 
@@ -1727,12 +1708,6 @@ const Game = () => {
             setSelectedCharacter(characterType);
         };
 
-        const handleGameJoined = ({ reconnected }) => {
-            if (reconnected) {
-                setToast({ message: t('gameUI.reconnected') || 'Session restored', type: 'info' });
-            }
-        };
-
         const showError = (message) => setToast({ message, type: 'error' });
 
         const handleJoinError = ({ message }) => {
@@ -1758,7 +1733,6 @@ const Game = () => {
         // Register listeners
         socket.on('connect', handleConnect);
         socket.on('connect_error', handleConnectError);
-        socket.on('gameJoined', handleGameJoined);
         socket.on('teamSelected', handleTeamSelected);
         socket.on('characterSelected', handleCharacterSelected);
         socket.on('teamUpdate', handleTeamUpdate);
@@ -1797,7 +1771,6 @@ const Game = () => {
                 console.log(`Quitando listeners del socket ${socket.id}`);
                 socket.off('connect', handleConnect);
                 socket.off('connect_error', handleConnectError);
-                socket.off('gameJoined', handleGameJoined);
                 socket.off('teamSelected', handleTeamSelected);
                 socket.off('characterSelected', handleCharacterSelected);
                 socket.off('teamUpdate', handleTeamUpdate);

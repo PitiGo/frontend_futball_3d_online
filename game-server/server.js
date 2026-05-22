@@ -84,7 +84,6 @@ const STATE_EMIT_RATE = 20; // Hz — physics at 60, network at 20
 const EMIT_EVERY_N_TICKS = PHYSICS_TICK_RATE / STATE_EMIT_RATE;
 const PHYSICS_DT = 1 / PHYSICS_TICK_RATE; // Delta time para física
 const KICKOFF_FREEZE_MS = 2000;
-const RECONNECT_GRACE_MS = 30000;
 
 const TEAM_CHARACTERS = {
   left: ['player', 'pig'],
@@ -125,7 +124,6 @@ availableSalas.forEach(roomId => {
     playerMovements: new Map(), // Mapa de socket.id -> { moveDirection: Vector3 }
     physicsTickCount: 0,
     kickoffFrozenUntil: 0,
-    disconnectedSessions: new Map(), // sessionId -> { name, team, characterType, ready, disconnectedAt }
   };
 });
 
@@ -723,7 +721,7 @@ io.on('connection', (socket) => {
   let currentRoomId = null; // ID de la sala para este socket
 
   // Handler 'joinGame'
-  socket.on('joinGame', ({ name, roomId, sessionId }) => {
+  socket.on('joinGame', ({ name, roomId }) => {
     console.log(`[${roomId || 'N/A'}] -> joinGame de ${socket.id} (${name})`);
 
     // Validaciones
@@ -741,59 +739,9 @@ io.on('connection', (socket) => {
       console.error(`[${roomId}] Error joinGame: Nombre inválido.`);
       return socket.emit('joinError', { message: 'Nombre inválido o vacío.' });
     }
-
-    // Reconexión: restaurar sesión si el jugador volvió dentro del periodo de gracia
-    if (sessionId && state.disconnectedSessions.has(sessionId)) {
-      const ghost = state.disconnectedSessions.get(sessionId);
-      if (performance.now() - ghost.disconnectedAt < RECONNECT_GRACE_MS && ghost.name === sanitizedName) {
-        state.disconnectedSessions.delete(sessionId);
-        socket.join(roomId);
-        currentRoomId = roomId;
-
-        const playerData = {
-          id: socket.id,
-          name: sanitizedName,
-          team: ghost.team,
-          characterType: ghost.characterType,
-          position: ghost.team ? getSpawnPosition(ghost.team) : new Vector3(0, PLAYER_RADIUS, 0),
-          rotation: new Quaternion(0, 0, 0, 1),
-          velocity: new Vector3(0, 0, 0),
-          ready: false,
-          isControllingBall: false,
-          ballControlTime: 0,
-          lastKickTime: 0,
-          sessionId,
-          roomId,
-        };
-        state.players.set(socket.id, playerData);
-        state.playerMovements.set(socket.id, { moveDirection: Vector3.Zero() });
-        if (ghost.team) {
-          state.teams[ghost.team].add(socket.id);
-        }
-
-        socket.emit('gameJoined', { id: socket.id, name: sanitizedName, roomId, reconnected: true });
-        if (ghost.team) socket.emit('teamSelected', { team: ghost.team });
-        if (ghost.characterType) socket.emit('characterSelected', { characterType: ghost.characterType });
-        const status = getTeamStatus(state);
-        socket.emit('teamUpdate', status.teams);
-        socket.emit('readyUpdate', getReadyPayload(state));
-        socket.emit('gameStateInfo', { currentState: state.currentGameState, score: state.score });
-        io.to(roomId).emit('playersListUpdate', Array.from(state.players.values()).map(p => ({
-          id: p.id, name: p.name, team: p.team, characterType: p.characterType
-        })));
-        emitGameState(roomId, state);
-        console.log(`[${roomId}] Sesión ${sessionId} restaurada para ${sanitizedName}.`);
-        return;
-      }
-      state.disconnectedSessions.delete(sessionId);
-    }
-
     // Evitar unirse si el nombre ya está en uso en esa sala
     let nameExists = false;
     state.players.forEach(p => { if (p.name === sanitizedName) nameExists = true; });
-    state.disconnectedSessions.forEach(ghost => {
-      if (ghost.name === sanitizedName) nameExists = true;
-    });
     if (nameExists) {
       console.error(`[${roomId}] Error joinGame: Nombre "${sanitizedName}" ya en uso.`);
       return socket.emit('joinError', { message: `El nombre "${sanitizedName}" ya está en uso.` });
@@ -829,7 +777,6 @@ io.on('connection', (socket) => {
       isControllingBall: false,
       ballControlTime: 0,
       lastKickTime: 0, // To avoid immediate collision after shot
-      sessionId: sessionId || null,
       roomId: roomId // Referencia a su sala
     };
     state.players.set(socket.id, playerData);
@@ -1095,23 +1042,6 @@ io.on('connection', (socket) => {
 
     if (player) {
       console.log(`[${currentRoomId}] Limpiando jugador ${player.name} (${socket.id}) por desconexión.`);
-
-      if (player.sessionId) {
-        state.disconnectedSessions.set(player.sessionId, {
-          name: player.name,
-          team: player.team,
-          characterType: player.characterType,
-          disconnectedAt: performance.now(),
-        });
-        setTimeout(() => {
-          if (state.disconnectedSessions.get(player.sessionId)?.disconnectedAt) {
-            const entry = state.disconnectedSessions.get(player.sessionId);
-            if (entry && performance.now() - entry.disconnectedAt >= RECONNECT_GRACE_MS) {
-              state.disconnectedSessions.delete(player.sessionId);
-            }
-          }
-        }, RECONNECT_GRACE_MS + 100);
-      }
 
       // Quitar de equipos y estado 'listo'
       if (player.team) {
