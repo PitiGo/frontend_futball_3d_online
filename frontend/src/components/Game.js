@@ -231,10 +231,12 @@ const Game = () => {
         onTeamSelected: ({ team }) => {
             setCurrentTeam(team);
             setTeamSelected(true);
+            setSelectedCharacter(null);
             if (socketRef.current?.id) {
                 playerMetaRef.current[socketRef.current.id] = {
                     ...playerMetaRef.current[socketRef.current.id],
                     team,
+                    characterType: undefined,
                 };
             }
         },

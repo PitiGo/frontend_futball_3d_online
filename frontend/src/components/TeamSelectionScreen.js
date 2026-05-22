@@ -298,7 +298,7 @@ const TeamSelectionScreen = ({
                   </div>
                 )}
               </div>
-              {!currentTeam && (
+              {currentTeam !== 'left' && !getReadyStatus(currentTeam, playerId) && (
                 <button
                   onClick={() => onTeamSelect('left')}
                   disabled={teams?.left?.length >= maxPlayersPerTeam}
@@ -400,7 +400,7 @@ const TeamSelectionScreen = ({
                   </div>
                 )}
               </div>
-              {!currentTeam && (
+              {currentTeam !== 'right' && !getReadyStatus(currentTeam, playerId) && (
                 <button
                   onClick={() => onTeamSelect('right')}
                   disabled={teams?.right?.length >= maxPlayersPerTeam}
