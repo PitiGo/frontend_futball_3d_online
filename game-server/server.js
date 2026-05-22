@@ -77,8 +77,9 @@ const RESTITUTION = 0.6; // Coeficiente de restitución (elasticidad)
 const MAX_PLAYERS_PER_TEAM = 3;
 const GOALS_TO_WIN = 3;
 const BALL_CONTROL_RADIUS = 1.5;
-const BALL_RELEASE_MIN = 25; // Minimum shot speed (quick tap)
-const BALL_RELEASE_MAX = 50; // Maximum shot speed (full charge)
+const BALL_RELEASE_MIN = 18; // Minimum shot speed (quick tap)
+const BALL_RELEASE_MAX = 36; // Maximum shot speed (full charge)
+const MAX_BALL_SPEED = 42; // Cap above release max; keeps shots readable
 const PHYSICS_TICK_RATE = 60; // Hz
 const STATE_EMIT_RATE = 20; // Hz — physics at 60, network at 20
 const EMIT_EVERY_N_TICKS = PHYSICS_TICK_RATE / STATE_EMIT_RATE;
@@ -567,16 +568,9 @@ function updateGamePhysics(roomId, state) {
     state.ballPosition.z = Math.sign(state.ballPosition.z) * (FIELD_HEIGHT / 2 - BALL_RADIUS);
     state.ballVelocity.z *= -RESTITUTION;
   }
-  // Colisión con suelo
-  if (state.ballPosition.y < BALL_RADIUS) {
-    state.ballPosition.y = BALL_RADIUS;
-    if (state.ballVelocity.y < 0) {
-      state.ballVelocity.y *= -RESTITUTION * 0.5; // Rebote menor
-      // Frenar X/Z en rebote suelo
-      state.ballVelocity.x *= 0.95;
-      state.ballVelocity.z *= 0.95;
-    }
-  }
+  // Arcade 2D: keep ball on ground — no vertical bounce
+  state.ballPosition.y = BALL_RADIUS;
+  state.ballVelocity.y = 0;
   // Si el juego ya no está en PLAYING (porque handleGoal cambió el estado), salir
   if (state.currentGameState !== gameStates.PLAYING) return;
 
@@ -593,6 +587,7 @@ function updateGamePhysics(roomId, state) {
     const controlRadius = stats.controlRadius || BALL_CONTROL_RADIUS;
 
     const vecToBall = state.ballPosition.subtract(player.position);
+    vecToBall.y = 0; // 2D collision on XZ plane — ignore player height differences
     const distSq = vecToBall.lengthSquared();
     const combinedRadius = playerRadius + BALL_RADIUS;
     const combinedRadiusSq = combinedRadius * combinedRadius;
@@ -615,6 +610,8 @@ function updateGamePhysics(roomId, state) {
         const rotationMatrix = new Matrix();
         player.rotation.toRotationMatrix(rotationMatrix);
         const worldForward = Vector3.TransformNormal(forward, rotationMatrix).normalize();
+        worldForward.y = 0;
+        if (worldForward.lengthSquared() > 0.001) worldForward.normalize();
         const expireSpeed = 6; // menor que un disparo manual
         state.ballVelocity = worldForward.scale(expireSpeed);
       } else {
@@ -646,7 +643,7 @@ function updateGamePhysics(roomId, state) {
 
       if (velocityAlongNormal < 0) { // Solo si se acercan
         // Restitution boost multiplier (1.5) - Makes ball "shoot" on contact instead of sticking to foot
-        const restitutionBoost = 1.5;
+        const restitutionBoost = 1.2;
         const impulseMagnitude = -(1 + RESTITUTION * restitutionBoost) * velocityAlongNormal / (INV_BALL_MASS + INV_PLAYER_MASS);
         const impulse = normal.scale(impulseMagnitude);
         state.ballVelocity.addInPlace(impulse.scale(INV_BALL_MASS));
@@ -663,10 +660,13 @@ function updateGamePhysics(roomId, state) {
     }
   });
 
-  // 4. Limitar Velocidades y Detener Pelota
-  const maxBallSpeedSq = 55 * 55; // Must exceed BALL_RELEASE_MAX (50)
+  // 4. Limitar Velocidades y anclar al suelo (física 2D)
+  state.ballPosition.y = BALL_RADIUS;
+  state.ballVelocity.y = 0;
+
+  const maxBallSpeedSq = MAX_BALL_SPEED * MAX_BALL_SPEED;
   if (state.ballVelocity.lengthSquared() > maxBallSpeedSq) {
-    state.ballVelocity.normalize().scaleInPlace(Math.sqrt(maxBallSpeedSq));
+    state.ballVelocity.normalize().scaleInPlace(MAX_BALL_SPEED);
   }
   if (state.ballVelocity.lengthSquared() < 0.05 * 0.05 && state.ballPosition.y === BALL_RADIUS) {
     state.ballVelocity.set(0, 0, 0); // Detener si es muy lenta en el suelo
@@ -981,6 +981,8 @@ io.on('connection', (socket) => {
         if (movement.lengthSquared() > 0.01) {
           worldForward = worldForward.add(movement).normalize();
         }
+        worldForward.y = 0;
+        if (worldForward.lengthSquared() > 0.001) worldForward.normalize();
 
         // Calculate shot speed
         const nowTs = performance.now();
