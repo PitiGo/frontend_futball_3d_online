@@ -86,6 +86,14 @@ export function createControlEffect(scene, advancedTexture) {
   controlTimeText.isVisible = false;
   advancedTexture.addControl(controlTimeText);
 
+  const controlPlayerNameText = new GUI.TextBlock();
+  controlPlayerNameText.text = '';
+  controlPlayerNameText.color = '#a8f0ff';
+  controlPlayerNameText.fontSize = 16;
+  controlPlayerNameText.fontWeight = 'bold';
+  controlPlayerNameText.isVisible = false;
+  advancedTexture.addControl(controlPlayerNameText);
+
   const ballHalo = BABYLON.MeshBuilder.CreateTorus('ballHalo', {
     diameter: 1.2,
     thickness: 0.1,
@@ -103,6 +111,7 @@ export function createControlEffect(scene, advancedTexture) {
     animateParticles,
     stopParticles,
     controlTimeText,
+    controlPlayerNameText,
     ballHalo,
     particles,
   };

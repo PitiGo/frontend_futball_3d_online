@@ -3,35 +3,20 @@ import { io } from 'socket.io-client';
 
 export function useGameSocket({
   roomId,
-  socketRef,
-  canvasRef,
-  engineRef,
-  sceneRef,
-  createScene,
-  updateGameState,
   hasJoined,
   playerName,
-  isRedirectingRef,
-  showingEndMessageRef,
-  goalTimeoutRef,
-  scoreTextRef,
-  startConfetti,
-  setToast,
-  setIsConnected,
-  setCurrentTeam,
-  setTeamSelected,
-  setTeams,
-  setReadyState,
-  setGameStarted,
-  setGameInProgress,
-  setScore,
-  setGoalFeedback,
-  setShakeScreen,
-  setGameOverInfo,
-  setShowingEndMessage,
-  setSelectedCharacter,
-  setChatMessages,
-  setConnectedPlayers,
+  createScene,
+  updateGameState,
+  refs: {
+    socketRef,
+    canvasRef,
+    engineRef,
+    sceneRef,
+    showingEndMessageRef,
+    goalTimeoutRef,
+    scoreTextRef,
+  },
+  callbacksRef,
 }) {
   const setupSocket = useCallback(() => {
     if (!roomId) return null;
@@ -80,80 +65,37 @@ export function useGameSocket({
     }
     if (!socket) return undefined;
 
-    const showError = (message) => setToast({ message, type: 'error' });
+    const cb = () => callbacksRef.current;
 
     const handleConnect = () => {
-      setIsConnected(true);
+      cb().onConnected?.();
       if (hasJoined && playerName) {
         socket.emit('joinGame', { name: playerName, roomId });
       }
     };
 
-    const handleConnectError = () => setIsConnected(false);
+    const handleConnectError = () => cb().onConnectError?.();
 
-    const handleTeamSelected = ({ team }) => {
-      setCurrentTeam(team);
-      setTeamSelected(true);
-    };
-
-    const handleCharacterSelected = ({ characterType }) => {
-      setSelectedCharacter(characterType);
-    };
-
-    const handleGameStart = () => {
-      setGameStarted(true);
-      setGameInProgress(true);
-    };
-
-    const handleGoalScored = ({ team, score: newScore }) => {
-      setScore(newScore);
-      if (scoreTextRef.current) {
-        scoreTextRef.current.left.text = (newScore.left || 0).toString();
-        scoreTextRef.current.right.text = (newScore.right || 0).toString();
-      }
-      setGoalFeedback({ visible: true, team });
-      setShakeScreen(true);
-      setTimeout(() => setShakeScreen(false), 500);
-      startConfetti(team);
-      if (goalTimeoutRef.current) clearTimeout(goalTimeoutRef.current);
-      goalTimeoutRef.current = setTimeout(() => {
-        setGoalFeedback({ visible: false, team: null });
-        goalTimeoutRef.current = null;
-      }, 2200);
-    };
-
-    const handleGameOver = (gameOverData) => {
-      setGameStarted(false);
-      setGameInProgress(false);
-      if (gameOverData) {
-        setGameOverInfo(gameOverData);
-        setShowingEndMessage(true);
-      }
-    };
-
-    const handleScoreUpdate = (newScore) => setScore(newScore);
-
-    const handleGameStateInfo = ({ currentState }) => {
-      setGameInProgress(currentState === 'playing');
-      if (currentState === 'waiting') {
-        setTimeout(() => {
-          if (showingEndMessageRef.current) return;
-          setShowingEndMessage(false);
-          setGameStarted(false);
-          setScore({ left: 0, right: 0 });
-          setGameOverInfo(null);
-        }, 100);
-      }
-    };
-
-    const handleChatUpdate = (message) => setChatMessages((prev) => [...prev, message]);
+    const handleTeamSelected = (data) => cb().onTeamSelected?.(data);
+    const handleCharacterSelected = (data) => cb().onCharacterSelected?.(data);
+    const handleGameStart = () => cb().onGameStart?.();
+    const handleGoalScored = (data) => cb().onGoalScored?.(data);
+    const handleGameOver = (data) => cb().onGameOver?.(data);
+    const handleScoreUpdate = (data) => cb().onScoreUpdate?.(data);
+    const handleGameStateInfo = (data) => cb().onGameStateInfo?.(data);
+    const handleChatUpdate = (data) => cb().onChatUpdate?.(data);
+    const handlePlayersListUpdate = (data) => cb().onPlayersListUpdate?.(data);
+    const handleJoinError = ({ message }) => cb().onError?.(message);
+    const handleSelectTeamError = ({ message }) => cb().onError?.(message);
+    const handleSelectCharacterError = ({ message }) => cb().onError?.(message);
+    const handleReadyError = ({ message }) => cb().onError?.(message);
 
     socket.on('connect', handleConnect);
     socket.on('connect_error', handleConnectError);
     socket.on('teamSelected', handleTeamSelected);
     socket.on('characterSelected', handleCharacterSelected);
-    socket.on('teamUpdate', setTeams);
-    socket.on('readyUpdate', setReadyState);
+    socket.on('teamUpdate', (data) => cb().onTeamUpdate?.(data));
+    socket.on('readyUpdate', (data) => cb().onReadyUpdate?.(data));
     socket.on('gameStateUpdate', updateGameState);
     socket.on('gameStart', handleGameStart);
     socket.on('goalScored', handleGoalScored);
@@ -161,11 +103,11 @@ export function useGameSocket({
     socket.on('scoreUpdate', handleScoreUpdate);
     socket.on('gameStateInfo', handleGameStateInfo);
     socket.on('chatUpdate', handleChatUpdate);
-    socket.on('playersListUpdate', setConnectedPlayers);
-    socket.on('joinError', ({ message }) => showError(message));
-    socket.on('selectTeamError', ({ message }) => showError(message));
-    socket.on('selectCharacterError', ({ message }) => showError(message));
-    socket.on('readyError', ({ message }) => showError(message));
+    socket.on('playersListUpdate', handlePlayersListUpdate);
+    socket.on('joinError', handleJoinError);
+    socket.on('selectTeamError', handleSelectTeamError);
+    socket.on('selectCharacterError', handleSelectCharacterError);
+    socket.on('readyError', handleReadyError);
 
     const engine = engineRef.current;
     if (engine && !engine.isPointerLock) {
@@ -181,8 +123,8 @@ export function useGameSocket({
       socket.off('connect_error', handleConnectError);
       socket.off('teamSelected', handleTeamSelected);
       socket.off('characterSelected', handleCharacterSelected);
-      socket.off('teamUpdate', setTeams);
-      socket.off('readyUpdate', setReadyState);
+      socket.off('teamUpdate');
+      socket.off('readyUpdate');
       socket.off('gameStateUpdate', updateGameState);
       socket.off('gameStart', handleGameStart);
       socket.off('goalScored', handleGoalScored);
@@ -190,7 +132,7 @@ export function useGameSocket({
       socket.off('scoreUpdate', handleScoreUpdate);
       socket.off('gameStateInfo', handleGameStateInfo);
       socket.off('chatUpdate', handleChatUpdate);
-      socket.off('playersListUpdate', setConnectedPlayers);
+      socket.off('playersListUpdate', handlePlayersListUpdate);
       socket.off('joinError');
       socket.off('selectTeamError');
       socket.off('selectCharacterError');
@@ -207,30 +149,12 @@ export function useGameSocket({
     updateGameState,
     hasJoined,
     playerName,
-    startConfetti,
     canvasRef,
     engineRef,
     socketRef,
     goalTimeoutRef,
-    scoreTextRef,
     sceneRef,
-    showingEndMessageRef,
-    setToast,
-    setIsConnected,
-    setCurrentTeam,
-    setTeamSelected,
-    setTeams,
-    setReadyState,
-    setGameStarted,
-    setGameInProgress,
-    setScore,
-    setGoalFeedback,
-    setShakeScreen,
-    setGameOverInfo,
-    setShowingEndMessage,
-    setSelectedCharacter,
-    setChatMessages,
-    setConnectedPlayers,
+    callbacksRef,
   ]);
 
   return { handleTeamSelect };

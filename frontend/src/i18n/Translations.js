@@ -99,6 +99,7 @@ const translations = {
       chatExpanded: "Chat ▼",
       writeMessage: "Write a message...",
       enterToSend: "Press Enter to send messages",
+      kickoffGo: "GO!",
     }
   },
 
@@ -200,6 +201,7 @@ const translations = {
       chatExpanded: "Chat ▼",
       writeMessage: "Escribe un mensaje...",
       enterToSend: "Presiona Enter para enviar mensajes",
+      kickoffGo: "¡YA!",
     }
   }
 };

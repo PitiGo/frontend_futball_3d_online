@@ -274,6 +274,7 @@ function startGame(roomId, state) {
   resetPlayersPositions(roomId, state); // Pasar roomId para emitir estado inicial
   io.to(roomId).emit('gameStart'); // Avisar a los clientes
   io.to(roomId).emit('scoreUpdate', state.score); // Enviar score inicial
+  io.to(roomId).emit('gameStateInfo', { currentState: state.currentGameState, kickoffInMs: KICKOFF_FREEZE_MS });
 
   // Iniciar el bucle de física/juego si no está corriendo
   if (!state.gameLoopInterval) {

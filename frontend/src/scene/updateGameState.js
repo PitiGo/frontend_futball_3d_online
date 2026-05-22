@@ -150,9 +150,11 @@ export function createUpdateGameState(refs) {
 
     if (controlEffectsRef.current && ballRef.current) {
       const hasControl = !!controllingPlayerId && controlRemainingMs > 0;
+      const controllingPlayer = players?.find((p) => p.id === controllingPlayerId);
       controlEffectsRef.current.ballHalo.isVisible = hasControl;
       controlEffectsRef.current.controlRing.isVisible = hasControl;
       controlEffectsRef.current.controlTimeText.isVisible = hasControl;
+      controlEffectsRef.current.controlPlayerNameText.isVisible = hasControl;
       if (hasControl) {
         const controllingMesh = playersRef.current[controllingPlayerId];
         if (controllingMesh) {
@@ -160,12 +162,16 @@ export function createUpdateGameState(refs) {
           controlEffectsRef.current.controlRing.position.y = 0.1;
         }
         const seconds = Math.ceil(controlRemainingMs / 100) / 10;
+        controlEffectsRef.current.controlPlayerNameText.text = controllingPlayer?.name || '';
         controlEffectsRef.current.controlTimeText.text = `${seconds.toFixed(1)}s`;
+        controlEffectsRef.current.controlPlayerNameText.top = isMobileView ? '20px' : '0px';
         controlEffectsRef.current.controlTimeText.top = isMobileView ? '40px' : '20px';
+        controlEffectsRef.current.controlPlayerNameText.linkWithMesh(ballRef.current);
         controlEffectsRef.current.controlTimeText.linkWithMesh(ballRef.current);
       } else {
         controlEffectsRef.current.stopParticles();
         controlEffectsRef.current.controlTimeText.text = '';
+        controlEffectsRef.current.controlPlayerNameText.text = '';
       }
     }
 

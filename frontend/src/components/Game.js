@@ -6,6 +6,7 @@ import MobileJoystick from './MobileJoystick';
 import LanguageSelector from '../i18n/LanguageSelector';
 import GameToast from './GameToast';
 import VictoryScreen from './VictoryScreen';
+import KickoffCountdown from './KickoffCountdown';
 import { useTranslation } from '../i18n/LanguageContext';
 import { useSearchParams } from 'react-router-dom';
 import { useControls } from '../hooks/useControls';
@@ -149,6 +150,7 @@ const Game = () => {
 
     const [chatExpanded, setChatExpanded] = useState(true);
     const [toast, setToast] = useState({ message: null, type: 'error' });
+    const [kickoffEndsAt, setKickoffEndsAt] = useState(null);
 
     const sceneReadyRef = useRef(false);
     const isMobileRef = useRef(false);
@@ -200,37 +202,84 @@ const Game = () => {
         onLoadComplete,
     });
 
+    const socketCallbacksRef = useRef({});
+    socketCallbacksRef.current = {
+        onConnected: () => setIsConnected(true),
+        onConnectError: () => setIsConnected(false),
+        onTeamSelected: ({ team }) => {
+            setCurrentTeam(team);
+            setTeamSelected(true);
+        },
+        onCharacterSelected: ({ characterType }) => setSelectedCharacter(characterType),
+        onTeamUpdate: setTeams,
+        onReadyUpdate: setReadyState,
+        onGameStart: () => {
+            setGameStarted(true);
+            setGameInProgress(true);
+        },
+        onGoalScored: ({ team, score: newScore }) => {
+            setScore(newScore);
+            if (scoreTextRef.current) {
+                scoreTextRef.current.left.text = (newScore.left || 0).toString();
+                scoreTextRef.current.right.text = (newScore.right || 0).toString();
+            }
+            setGoalFeedback({ visible: true, team });
+            setShakeScreen(true);
+            setTimeout(() => setShakeScreen(false), 500);
+            startConfetti(team);
+            if (goalTimeoutRef.current) clearTimeout(goalTimeoutRef.current);
+            goalTimeoutRef.current = setTimeout(() => {
+                setGoalFeedback({ visible: false, team: null });
+                goalTimeoutRef.current = null;
+            }, 2200);
+        },
+        onGameOver: (gameOverData) => {
+            setGameStarted(false);
+            setGameInProgress(false);
+            setKickoffEndsAt(null);
+            if (gameOverData) {
+                setGameOverInfo(gameOverData);
+                setShowingEndMessage(true);
+            }
+        },
+        onScoreUpdate: setScore,
+        onGameStateInfo: ({ currentState, kickoffInMs }) => {
+            setGameInProgress(currentState === 'playing');
+            if (kickoffInMs) {
+                setKickoffEndsAt(Date.now() + kickoffInMs);
+            }
+            if (currentState === 'waiting') {
+                setTimeout(() => {
+                    if (showingEndMessageRef.current) return;
+                    setShowingEndMessage(false);
+                    setGameStarted(false);
+                    setScore({ left: 0, right: 0 });
+                    setGameOverInfo(null);
+                    setKickoffEndsAt(null);
+                }, 100);
+            }
+        },
+        onChatUpdate: (message) => setChatMessages((prev) => [...prev, message]),
+        onPlayersListUpdate: setConnectedPlayers,
+        onError: (message) => setToast({ message, type: 'error' }),
+    };
+
     const { handleTeamSelect } = useGameSocket({
         roomId,
-        socketRef,
-        canvasRef,
-        engineRef,
-        sceneRef,
-        createScene,
-        updateGameState,
         hasJoined,
         playerName,
-        isRedirectingRef,
-        showingEndMessageRef,
-        goalTimeoutRef,
-        scoreTextRef,
-        startConfetti,
-        setToast,
-        setIsConnected,
-        setCurrentTeam,
-        setTeamSelected,
-        setTeams,
-        setReadyState,
-        setGameStarted,
-        setGameInProgress,
-        setScore,
-        setGoalFeedback,
-        setShakeScreen,
-        setGameOverInfo,
-        setShowingEndMessage,
-        setSelectedCharacter,
-        setChatMessages,
-        setConnectedPlayers,
+        createScene,
+        updateGameState,
+        refs: {
+            socketRef,
+            canvasRef,
+            engineRef,
+            sceneRef,
+            showingEndMessageRef,
+            goalTimeoutRef,
+            scoreTextRef,
+        },
+        callbacksRef: socketCallbacksRef,
     });
 
     const handleJoinGame = (name) => {
@@ -428,6 +477,10 @@ const Game = () => {
                     touchAction: 'none'
                 }}
             />
+
+            {kickoffEndsAt && gameStarted && (
+                <KickoffCountdown kickoffEndsAt={kickoffEndsAt} isMobile={isMobile} />
+            )}
 
             {/* Overlay de Gol */}
             {goalFeedback.visible && (
