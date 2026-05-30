@@ -1,9 +1,17 @@
 import * as BABYLON from '@babylonjs/core';
 import * as GUI from '@babylonjs/gui';
 import { getPlayerVisualY } from '../constants/characterStats';
+import { playKick } from '../services/sound';
 
 const SNAP_DISTANCE = 3;
 const LERP_ALPHA = 0.15;
+
+// Stamina bar colors by remaining fraction.
+function staminaColor(fraction) {
+  if (fraction > 0.5) return 'linear-gradient(90deg, #22c55e, #86efac)';
+  if (fraction > 0.2) return 'linear-gradient(90deg, #f59e0b, #fcd34d)';
+  return 'linear-gradient(90deg, #ef4444, #fca5a5)';
+}
 
 function lerpToward(current, target) {
   const dist = BABYLON.Vector3.Distance(current, target);
@@ -26,7 +34,13 @@ export function createUpdateGameState(refs) {
     sceneRef,
     playerMetaRef,
     setConnectedPlayers,
+    staminaFillRef,
+    staminaContainerRef,
   } = refs;
+
+  // Closure state to detect sudden ball acceleration (kicks/shots) for SFX.
+  let prevBallPos = null;
+  let prevBallStep = 0;
 
   return (gameState) => {
     if (!sceneReadyRef.current || !gameState || !characterManagerRef.current) {
@@ -145,6 +159,21 @@ export function createUpdateGameState(refs) {
       });
     }
 
+    if (ballPosition) {
+      // Detect a sudden jump in the ball's authoritative step (shot/strong hit) → kick SFX.
+      if (prevBallPos) {
+        const dx = ballPosition.x - prevBallPos.x;
+        const dz = ballPosition.z - prevBallPos.z;
+        const step = Math.hypot(dx, dz);
+        // Plausible shot range: ignore tiny drift and huge teleports (kickoff resets).
+        if (step > 0.8 && step < 4 && prevBallStep < 0.5) {
+          playKick();
+        }
+        prevBallStep = step;
+      }
+      prevBallPos = { x: ballPosition.x, z: ballPosition.z };
+    }
+
     if (ballRef.current && ballPosition) {
       const currentPosition = ballRef.current.position;
       const targetPosition = new BABYLON.Vector3(
@@ -195,6 +224,25 @@ export function createUpdateGameState(refs) {
 
     if (connectedPlayers) {
       setConnectedPlayers(connectedPlayers);
+    }
+
+    // Update local player's stamina bar (direct DOM write to avoid 20Hz React re-renders).
+    if (staminaFillRef?.current && staminaContainerRef?.current) {
+      const selfId = socketRef.current?.id;
+      const self = selfId && Array.isArray(players)
+        ? players.find((p) => p.id === selfId)
+        : null;
+      if (self && typeof self.stamina === 'number') {
+        const fraction = Math.max(0, Math.min(1, self.stamina));
+        staminaContainerRef.current.style.display = 'block';
+        staminaFillRef.current.style.width = `${(fraction * 100).toFixed(1)}%`;
+        staminaFillRef.current.style.background = staminaColor(fraction);
+        staminaFillRef.current.style.boxShadow = self.isSprinting
+          ? '0 0 10px rgba(56, 189, 248, 0.8)'
+          : 'none';
+      } else {
+        staminaContainerRef.current.style.display = 'none';
+      }
     }
   };
 }

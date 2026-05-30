@@ -12,6 +12,7 @@ import { useSearchParams } from 'react-router-dom';
 import { useControls } from '../hooks/useControls';
 import { useScene } from '../hooks/useScene';
 import { useGameSocket } from '../hooks/useGameSocket';
+import { initAudio, playGoal, playWhistle, toggleMuted, isMuted } from '../services/sound';
 
 const MAX_CHAT_MESSAGES = 50;
 
@@ -60,6 +61,9 @@ const Game = () => {
     const advancedTextureRef = useRef(null); // Referencia para la GUI
     const ballRef = useRef(null);
     const scoreTextRef = useRef(null);
+    const staminaFillRef = useRef(null);
+    const staminaContainerRef = useRef(null);
+    const [muted, setMuted] = useState(isMuted());
     const [playerName, setPlayerName] = useState(null);
     const [isConnected, setIsConnected] = useState(false);
     const [sceneReady, setSceneReady] = useState(false);
@@ -183,7 +187,7 @@ const Game = () => {
     const chatMessagesRef = useRef(null);
     const [isMobileChatExpanded, setIsMobileChatExpanded] = useState(false);
 
-    const { handleDirectionChange, resetMovement } = useControls({
+    const { handleDirectionChange, resetMovement, setSprint } = useControls({
         socketRef,
         gameStarted,
         isConnected,
@@ -214,6 +218,8 @@ const Game = () => {
         sceneReadyRef,
         isMobileRef,
         setConnectedPlayers,
+        staminaFillRef,
+        staminaContainerRef,
     }), [setConnectedPlayers]);
 
     const onSceneReady = useCallback(() => setSceneReady(true), []);
@@ -260,6 +266,7 @@ const Game = () => {
         },
         onGoalScored: ({ team, score: newScore }) => {
             setScore(newScore);
+            playGoal();
             if (scoreTextRef.current) {
                 scoreTextRef.current.left.text = (newScore.left || 0).toString();
                 scoreTextRef.current.right.text = (newScore.right || 0).toString();
@@ -288,6 +295,7 @@ const Game = () => {
             setGameInProgress(currentState === 'playing');
             if (kickoffInMs) {
                 setKickoffEndsAt(Date.now() + kickoffInMs);
+                playWhistle();
             }
             if (currentState === 'waiting') {
                 setTimeout(() => {
@@ -327,10 +335,16 @@ const Game = () => {
     });
 
     const handleJoinGame = (name) => {
+        initAudio(); // Unlock Web Audio within the user gesture (click on Play).
         socketRef.current.emit('joinGame', { name: name.trim(), roomId });
         setPlayerName(name);
         setHasJoined(true);
     };
+
+    const handleToggleMute = useCallback(() => {
+        initAudio();
+        setMuted(toggleMuted());
+    }, []);
 
     const handleBackToLobby = useCallback(() => {
         setShowingEndMessage(false);
@@ -474,6 +488,32 @@ const Game = () => {
             {/* Agregar el selector de idioma aquí */}
             <LanguageSelector />
 
+            {/* Botón de silencio (sonido del juego) */}
+            <button
+                onClick={handleToggleMute}
+                aria-label={muted ? t('gameUI.unmute') : t('gameUI.mute')}
+                title={muted ? t('gameUI.unmute') : t('gameUI.mute')}
+                style={{
+                    position: 'absolute',
+                    top: '10px',
+                    right: '96px',
+                    zIndex: 1000,
+                    width: '34px',
+                    height: '34px',
+                    borderRadius: '6px',
+                    border: '1px solid rgba(255,255,255,0.3)',
+                    backgroundColor: 'rgba(0, 0, 0, 0.55)',
+                    color: 'white',
+                    fontSize: '16px',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center'
+                }}
+            >
+                {muted ? '🔇' : '🔊'}
+            </button>
+
             {isLoading && <LoadingScreen />}
 
             {!isLoading && !hasJoined && (
@@ -524,6 +564,51 @@ const Game = () => {
 
             {kickoffEndsAt && gameStarted && (
                 <KickoffCountdown kickoffEndsAt={kickoffEndsAt} isMobile={isMobile} />
+            )}
+
+            {/* Barra de Stamina (sprint) — actualizada vía ref desde updateGameState */}
+            {gameStarted && teamSelected && (
+                <div
+                    ref={staminaContainerRef}
+                    style={{
+                        position: 'absolute',
+                        bottom: isMobile ? '14px' : '22px',
+                        left: '50%',
+                        transform: 'translateX(-50%)',
+                        width: isMobile ? '150px' : '220px',
+                        zIndex: 50,
+                        pointerEvents: 'none',
+                        display: 'none'
+                    }}
+                >
+                    <div style={{
+                        fontSize: '10px',
+                        color: 'white',
+                        textAlign: 'center',
+                        marginBottom: '3px',
+                        letterSpacing: '1px',
+                        textShadow: '0 1px 2px rgba(0,0,0,0.6)'
+                    }}>
+                        {t('gameUI.stamina')}
+                    </div>
+                    <div style={{
+                        height: '10px',
+                        background: 'rgba(0,0,0,0.5)',
+                        borderRadius: '6px',
+                        overflow: 'hidden',
+                        border: '1px solid rgba(255,255,255,0.25)'
+                    }}>
+                        <div
+                            ref={staminaFillRef}
+                            style={{
+                                height: '100%',
+                                width: '100%',
+                                background: 'linear-gradient(90deg, #22c55e, #86efac)',
+                                transition: 'width 0.1s linear, background 0.2s'
+                            }}
+                        />
+                    </div>
+                </div>
             )}
 
             {/* Overlay de Gol */}
@@ -694,10 +779,15 @@ const Game = () => {
                                     ? t('gameUI.mobileMovementInstructions')
                                     : t('gameUI.moveInstructions')}
                             </p>
-                            <p style={{ margin: '0' }}>
+                            <p style={{ margin: '0 0 4px 0' }}>
                                 {isMobile
                                     ? t('gameUI.mobileChatInstructions')
                                     : t('gameUI.ballControlInstructions')}
+                            </p>
+                            <p style={{ margin: '0' }}>
+                                {isMobile
+                                    ? t('gameUI.mobileSprintInstructions')
+                                    : t('gameUI.sprintInstructions')}
                             </p>
                         </div>
 
@@ -714,6 +804,7 @@ const Game = () => {
                                             socketRef.current.emit('ballControl', { control });
                                         }
                                     }}
+                                    onSprintChange={setSprint}
                                 />
                         )}
 
@@ -909,10 +1000,15 @@ const Game = () => {
                                         ? t('gameUI.mobileMovementInstructions')
                                         : t('gameUI.moveInstructions')}
                                 </p>
-                                <p style={{ margin: '0' }}>
+                                <p style={{ margin: '0 0 4px 0' }}>
                                     {isMobile
                                         ? t('gameUI.mobileChatInstructions')
                                         : t('gameUI.ballControlInstructions')}
+                                </p>
+                                <p style={{ margin: '0 0 4px 0' }}>
+                                    {isMobile
+                                        ? t('gameUI.mobileSprintInstructions')
+                                        : t('gameUI.sprintInstructions')}
                                 </p>
                                 <p style={{ margin: '0' }}>
                                     {isMobile ? '' : t('gameUI.enterToSend')}

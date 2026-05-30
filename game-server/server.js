@@ -88,6 +88,13 @@ const EMIT_EVERY_N_TICKS = PHYSICS_TICK_RATE / STATE_EMIT_RATE;
 const PHYSICS_DT = 1 / PHYSICS_TICK_RATE; // Delta time para física
 const KICKOFF_FREEZE_MS = 2000;
 
+// --- Sprint / Stamina ---
+const SPRINT_SPEED_MULTIPLIER = 1.55; // Boost de velocidad mientras se esprinta
+const STAMINA_MAX = 100;
+const STAMINA_DRAIN_PER_SEC = 32;   // Gasto al esprintar
+const STAMINA_REGEN_PER_SEC = 18;   // Recuperación cuando no se esprinta
+const STAMINA_RECOVER_THRESHOLD = 30; // Tras agotarse, hay que recuperar hasta aquí para volver a esprintar
+
 const TEAM_CHARACTERS = {
   left: ['player', 'pig'],
   right: ['turtle', 'lizard']
@@ -195,6 +202,10 @@ function resetPlayersPositions(roomId, state) {
     player.isControllingBall = false;
     player.ballControlTime = 0;
     player.lastKickTime = 0;
+    player.stamina = STAMINA_MAX;
+    player.wantSprint = false;
+    player.isSprinting = false;
+    player.exhausted = false;
     // Asegurarse de que el estado de movimiento esté inicializado
     if (!state.playerMovements.has(player.id)) {
       state.playerMovements.set(player.id, { moveDirection: Vector3.Zero() });
@@ -374,6 +385,10 @@ function resetFullRoomState(roomId, state) {
   state.players.forEach(player => {
     player.ready = false;
     player.isControllingBall = false;
+    player.stamina = STAMINA_MAX;
+    player.wantSprint = false;
+    player.isSprinting = false;
+    player.exhausted = false;
     if (player.team) {
       player.position = getSpawnPosition(player.team);
     } else {
@@ -484,8 +499,21 @@ function updateGamePhysics(roomId, state) {
       return;
     }
 
+    // Sprint / Stamina: drena al esprintar en movimiento, regenera el resto del tiempo.
+    const isMoving = movement.moveDirection.lengthSquared() > 0.01;
+    if (player.stamina <= 0) player.exhausted = true;
+    if (player.stamina >= STAMINA_RECOVER_THRESHOLD) player.exhausted = false;
+    const sprinting = player.wantSprint && isMoving && player.stamina > 0 && !player.exhausted;
+    if (sprinting) {
+      player.stamina = Math.max(0, player.stamina - STAMINA_DRAIN_PER_SEC * PHYSICS_DT);
+    } else {
+      player.stamina = Math.min(STAMINA_MAX, player.stamina + STAMINA_REGEN_PER_SEC * PHYSICS_DT);
+    }
+    player.isSprinting = sprinting;
+    const speedFactor = sprinting ? SPRINT_SPEED_MULTIPLIER : 1;
+
     // Aceleración / frenado suave hacia la velocidad objetivo (inercia arcade)
-    const maxSpeed = PLAYER_SPEED * stats.speedMultiplier;
+    const maxSpeed = PLAYER_SPEED * stats.speedMultiplier * speedFactor;
     const targetX = movement.moveDirection.x * maxSpeed;
     const targetZ = movement.moveDirection.z * maxSpeed;
     stepPlayerVelocityXZ(player.velocity, targetX, targetZ, PHYSICS_DT);
@@ -696,6 +724,8 @@ function emitGameState(roomId, state) {
     position: vector3ToObject(p.position),
     isMoving: state.playerMovements.get(p.id)?.moveDirection.lengthSquared() > 0.01,
     isControllingBall: p.isControllingBall,
+    stamina: Math.round((p.stamina / STAMINA_MAX) * 100) / 100, // 0..1 normalizado
+    isSprinting: p.isSprinting,
   }));
 
   // Calcular jugador que controla y tiempo restante
@@ -783,6 +813,10 @@ io.on('connection', (socket) => {
       isControllingBall: false,
       ballControlTime: 0,
       lastKickTime: 0, // To avoid immediate collision after shot
+      stamina: STAMINA_MAX,   // Energía para esprintar (0..STAMINA_MAX)
+      wantSprint: false,      // Input de sprint del jugador
+      isSprinting: false,     // Estado real de sprint (resuelto en física)
+      exhausted: false,       // Latch: bloquea sprint hasta recuperar stamina
       roomId: roomId // Referencia a su sala
     };
     state.players.set(socket.id, playerData);
@@ -947,6 +981,15 @@ io.on('connection', (socket) => {
   });
 
   // Eliminados handlers playerMoveStart/playerMoveStop en favor de playerMove con vector
+
+  // Handler 'sprint' — activa/desactiva la intención de esprintar del jugador
+  socket.on('sprint', ({ active } = {}) => {
+    if (!currentRoomId) return;
+    const state = salaStates[currentRoomId];
+    const player = state?.players.get(socket.id);
+    if (!player || state.currentGameState !== gameStates.PLAYING) return;
+    player.wantSprint = active === true;
+  });
 
   // Handler 'ballControl'
   socket.on('ballControl', ({ control }) => {

@@ -23,6 +23,8 @@ A real-time multiplayer soccer game where two teams of anthropomorphic animals c
   - **Mammals (Blue Team)**: Rabbit and Pig characters.
   - **Reptiles (Red Team)**: Turtle and Lizard characters.
 - **Physics-based Ball Control**: Realistic ball physics with control mechanics.
+- **Sprint & Stamina**: Burst of speed by sprinting, managed by a stamina bar that drains and regenerates (server-authoritative).
+- **Dynamic Sound Effects**: Kick, goal, and kickoff-whistle sounds synthesized in-browser with the Web Audio API (no audio assets), with a mute toggle.
 - **In-game Chat**: Communicate with other players during matches.
 - **Responsive Design**: Supports both desktop and mobile devices.
 - **Internationalization**: Multi-language support (English and Spanish).
@@ -50,12 +52,15 @@ This project is structured as a monorepo with two main services: the frontend an
 
 ### Desktop
 - **Movement**: WASD or Arrow Keys
+- **Sprint**: Hold Shift to sprint (consumes stamina).
 - **Control Ball**: Hold Spacebar to control the ball (max 3s).
 - **Shoot**: Release Spacebar to shoot the ball.
 - **Chat**: Press Enter to open the chat, and press it again to send the message.
+- **Sound**: Toggle game sound with the speaker button (top-right).
 
 ### Mobile
 - **Movement**: On-screen virtual joystick.
+- **Sprint**: Hold the ⚡ button (consumes stamina).
 - **Control/Shoot Ball**: Dedicated on-screen button (hold to control, release to shoot).
 - **Chat**: Tap the chat icon to expand and communicate.
 
