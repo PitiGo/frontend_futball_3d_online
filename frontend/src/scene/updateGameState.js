@@ -36,6 +36,8 @@ export function createUpdateGameState(refs) {
     setConnectedPlayers,
     staminaFillRef,
     staminaContainerRef,
+    setMatchTimeLeft,
+    lastMatchSecondRef,
   } = refs;
 
   // Closure state to detect sudden ball acceleration (kicks/shots) for SFX.
@@ -54,8 +56,19 @@ export function createUpdateGameState(refs) {
       connectedPlayers,
       controllingPlayerId,
       controlRemainingMs,
+      matchTimeLeftMs,
     } = gameState;
     const isMobileView = isMobileRef.current;
+
+    // Match timer: push to React state only when the whole second changes
+    // (avoids 20Hz re-renders).
+    if (setMatchTimeLeft && typeof matchTimeLeftMs === 'number') {
+      const sec = Math.max(0, Math.ceil(matchTimeLeftMs / 1000));
+      if (lastMatchSecondRef && lastMatchSecondRef.current !== sec) {
+        lastMatchSecondRef.current = sec;
+        setMatchTimeLeft(sec);
+      }
+    }
 
     if (players && Array.isArray(players)) {
       players.forEach(async (playerData) => {
@@ -211,8 +224,12 @@ export function createUpdateGameState(refs) {
         const seconds = Math.ceil(controlRemainingMs / 100) / 10;
         controlEffectsRef.current.controlPlayerNameText.text = controllingName;
         controlEffectsRef.current.controlTimeText.text = `${seconds.toFixed(1)}s`;
-        controlEffectsRef.current.controlPlayerNameText.top = isMobileView ? '20px' : '0px';
-        controlEffectsRef.current.controlTimeText.top = isMobileView ? '40px' : '20px';
+        // Float the labels above the ball (negative offset = up) so they don't
+        // cover it. `top` stays at 0; vertical placement uses linkOffsetY.
+        controlEffectsRef.current.controlPlayerNameText.top = '0px';
+        controlEffectsRef.current.controlTimeText.top = '0px';
+        controlEffectsRef.current.controlPlayerNameText.linkOffsetY = isMobileView ? -52 : -70;
+        controlEffectsRef.current.controlTimeText.linkOffsetY = isMobileView ? -34 : -48;
         controlEffectsRef.current.controlPlayerNameText.linkWithMesh(ballRef.current);
         controlEffectsRef.current.controlTimeText.linkWithMesh(ballRef.current);
       } else {

@@ -85,10 +85,12 @@ export function useGameSocket({
     const handleGameStateInfo = (data) => cb().onGameStateInfo?.(data);
     const handleChatUpdate = (data) => cb().onChatUpdate?.(data);
     const handlePlayersListUpdate = (data) => cb().onPlayersListUpdate?.(data);
+    const handleBallBounce = (data) => cb().onBallBounce?.(data);
     const handleJoinError = ({ message }) => cb().onError?.(message);
     const handleSelectTeamError = ({ message }) => cb().onError?.(message);
     const handleSelectCharacterError = ({ message }) => cb().onError?.(message);
     const handleReadyError = ({ message }) => cb().onError?.(message);
+    const handleChatError = ({ message }) => cb().onError?.(message);
 
     socket.on('connect', handleConnect);
     socket.on('connect_error', handleConnectError);
@@ -104,10 +106,12 @@ export function useGameSocket({
     socket.on('gameStateInfo', handleGameStateInfo);
     socket.on('chatUpdate', handleChatUpdate);
     socket.on('playersListUpdate', handlePlayersListUpdate);
+    socket.on('ballBounce', handleBallBounce);
     socket.on('joinError', handleJoinError);
     socket.on('selectTeamError', handleSelectTeamError);
     socket.on('selectCharacterError', handleSelectCharacterError);
     socket.on('readyError', handleReadyError);
+    socket.on('chatError', handleChatError);
 
     const engine = engineRef.current;
     if (engine && !engine.isPointerLock) {
@@ -133,10 +137,12 @@ export function useGameSocket({
       socket.off('gameStateInfo', handleGameStateInfo);
       socket.off('chatUpdate', handleChatUpdate);
       socket.off('playersListUpdate', handlePlayersListUpdate);
+      socket.off('ballBounce', handleBallBounce);
       socket.off('joinError');
       socket.off('selectTeamError');
       socket.off('selectCharacterError');
       socket.off('readyError');
+      socket.off('chatError');
       if (goalTimeoutRef.current) {
         clearTimeout(goalTimeoutRef.current);
         goalTimeoutRef.current = null;

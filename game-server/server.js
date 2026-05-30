@@ -22,6 +22,15 @@ import {
 
 const app = express();
 
+// --- Logger gateado por entorno ---
+// En producción (NODE_ENV=production) silenciamos los logs de depuración para
+// reducir ruido; warn/error siempre se muestran. Forzar con LOG_LEVEL=debug.
+const DEBUG_LOGS = process.env.LOG_LEVEL === 'debug' || process.env.NODE_ENV !== 'production';
+const _console = console;
+const log = (...args) => { if (DEBUG_LOGS) _console.log(...args); };
+const warn = (...args) => _console.warn(...args);
+const error = (...args) => _console.error(...args);
+
 // Utilidades de configuración por entorno
 function parseEnvList(name, fallbackList) {
   const raw = process.env[name];
@@ -88,6 +97,9 @@ const EMIT_EVERY_N_TICKS = PHYSICS_TICK_RATE / STATE_EMIT_RATE;
 const PHYSICS_DT = 1 / PHYSICS_TICK_RATE; // Delta time para física
 const KICKOFF_FREEZE_MS = 2000;
 
+// Duración del partido (parametrizable). Al agotarse, gana quien tenga más goles.
+const MATCH_DURATION_MS = (parseInt(process.env.MATCH_DURATION_SEC, 10) || 180) * 1000;
+
 // --- Sprint / Stamina ---
 const SPRINT_SPEED_MULTIPLIER = 1.55; // Boost de velocidad mientras se esprinta
 const STAMINA_MAX = 100;
@@ -134,6 +146,8 @@ availableSalas.forEach(roomId => {
     playerMovements: new Map(), // Mapa de socket.id -> { moveDirection: Vector3 }
     physicsTickCount: 0,
     kickoffFrozenUntil: 0,
+    matchTimeLeftMs: MATCH_DURATION_MS, // Tiempo restante; solo baja en PLAYING activo
+    lastBounceEmit: 0, // Throttle para el evento de sonido de rebote
   };
 });
 
@@ -196,7 +210,7 @@ function resetBall(state) {
 }
 
 function resetPlayersPositions(roomId, state) {
-  console.log(`[${roomId}] Reposicionando jugadores.`);
+  log(`[${roomId}] Reposicionando jugadores.`);
   state.players.forEach((player) => {
     if (player.team) {
       player.position = getSpawnPosition(player.team);
@@ -267,6 +281,23 @@ function getWinningMessage(winningTeam) {
   }
 }
 
+// Finaliza el partido al agotarse el tiempo: gana quien tenga más goles (o empate).
+function endMatchByTime(roomId, state) {
+  const { left, right } = state.score;
+  let winningTeam = null;
+  let reason;
+  if (left > right) {
+    winningTeam = 'left';
+    reason = getWinningMessage('left') + " (Time up)";
+  } else if (right > left) {
+    winningTeam = 'right';
+    reason = getWinningMessage('right') + " (Time up)";
+  } else {
+    reason = "Time up — it's a draw!";
+  }
+  stopGame(roomId, state, reason, { ...state.score }, winningTeam);
+}
+
 // --- Lógica de Inicio/Fin de Juego ---
 
 function checkStartGame(roomId, state) {
@@ -280,7 +311,7 @@ function checkStartGame(roomId, state) {
   // Condiciones para empezar: Al menos 1 jugador por equipo, y TODOS listos
   if (leftPlayerCount > 0 && rightPlayerCount > 0 &&
     leftReadyCount === leftPlayerCount && rightReadyCount === rightPlayerCount) {
-    console.log(`[${roomId}] ¡Iniciando juego!`);
+    log(`[${roomId}] ¡Iniciando juego!`);
     startGame(roomId, state);
     return true;
   }
@@ -291,6 +322,7 @@ function startGame(roomId, state) {
   state.currentGameState = gameStates.PLAYING;
   state.score = { left: 0, right: 0 };
   state.gameOverData = null; // Limpiar datos de juego anterior
+  state.matchTimeLeftMs = MATCH_DURATION_MS; // Reiniciar reloj de partido
   resetBall(state);
   resetPlayersPositions(roomId, state); // Pasar roomId para emitir estado inicial
   io.to(roomId).emit('gameStart'); // Avisar a los clientes
@@ -309,18 +341,18 @@ function startGame(roomId, state) {
         emitGameState(roomId, state);
       }
     }, 1000 / PHYSICS_TICK_RATE);
-    console.log(`[${roomId}] Bucle de juego iniciado (${PHYSICS_TICK_RATE}Hz física, ${STATE_EMIT_RATE}Hz red).`);
+    log(`[${roomId}] Bucle de juego iniciado (${PHYSICS_TICK_RATE}Hz física, ${STATE_EMIT_RATE}Hz red).`);
   }
 }
 
 function stopGame(roomId, state, reason, finalScore, winningTeam) {
   if (state.currentGameState === gameStates.GAME_OVER) return; // Evitar múltiples llamadas
 
-  console.log(`[${roomId}] Intentando detener juego. Razón: ${reason}`);
+  log(`[${roomId}] Intentando detener juego. Razón: ${reason}`);
   if (state.gameLoopInterval) {
     clearInterval(state.gameLoopInterval);
     state.gameLoopInterval = null;
-    console.log(`[${roomId}] Bucle de juego detenido para ${roomId}.`);
+    log(`[${roomId}] Bucle de juego detenido para ${roomId}.`);
   }
 
   if (state.goalScoredTimeout) {
@@ -346,16 +378,16 @@ function stopGame(roomId, state, reason, finalScore, winningTeam) {
   state.readyState.right.clear();
 
   // Emitir gameOver PRIMERO, antes de cualquier otro evento
-  console.log(`[${roomId}] Emitiendo gameOver con datos:`, JSON.stringify(state.gameOverData, null, 2));
+  log(`[${roomId}] Emitiendo gameOver con datos:`, JSON.stringify(state.gameOverData, null, 2));
   io.to(roomId).emit('gameOver', state.gameOverData);
   // También emitir gameStateInfo con GAME_OVER para sincronizar estado
   io.to(roomId).emit('gameStateInfo', { currentState: state.currentGameState });
-  console.log(`[${roomId}] Juego terminado: ${reason}. Eventos gameOver y gameStateInfo emitidos.`);
+  log(`[${roomId}] Juego terminado: ${reason}. Eventos gameOver y gameStateInfo emitidos.`);
 
   // Programa el reinicio de la sala después de un tiempo (reduced to 5 seconds for faster flow)
-  console.log(`[${roomId}] Programando reinicio de sala en 5 segundos...`);
+  log(`[${roomId}] Programando reinicio de sala en 5 segundos...`);
   state.gameOverTimeout = setTimeout(() => {
-    console.log(`[${roomId}] Ejecutando reinicio de sala...`);
+    log(`[${roomId}] Ejecutando reinicio de sala...`);
     state.gameOverTimeout = null;
     resetFullRoomState(roomId, state);
   }, 5000); // 5 segundos
@@ -364,7 +396,7 @@ function stopGame(roomId, state, reason, finalScore, winningTeam) {
 // Reinicia la sala al estado WAITING, manteniendo jugadores y equipos
 function resetFullRoomState(roomId, state) {
   if (!state) return;
-  console.log(`[${roomId}] Reiniciando estado de sala a WAITING.`);
+  log(`[${roomId}] Reiniciando estado de sala a WAITING.`);
 
   if (state.gameLoopInterval) {
     clearInterval(state.gameLoopInterval);
@@ -411,13 +443,13 @@ function resetFullRoomState(roomId, state) {
   io.to(roomId).emit('gameStateInfo', { currentState: state.currentGameState });
   io.to(roomId).emit('scoreUpdate', state.score); // Enviar score actualizado
   emitGameState(roomId, state); // Enviar estado inicial de posiciones
-  console.log(`[${roomId}] Estado de sala reiniciado a WAITING. Eventos emitidos.`);
+  log(`[${roomId}] Estado de sala reiniciado a WAITING. Eventos emitidos.`);
 }
 
 function handleGoal(roomId, state, scoringTeam) {
   // Doble chequeo por si acaso
   if (state.currentGameState !== gameStates.PLAYING) {
-    console.log(`[${roomId}] Intento de gol ignorado, estado actual: ${state.currentGameState}`);
+    log(`[${roomId}] Intento de gol ignorado, estado actual: ${state.currentGameState}`);
     return;
   }
 
@@ -425,10 +457,10 @@ function handleGoal(roomId, state, scoringTeam) {
 
   if (scoringTeam === 'left') {
     state.score.left++;
-    console.log(`[${roomId}] Gol para equipo IZQUIERDO. Score: ${state.score.left}-${state.score.right}`);
+    log(`[${roomId}] Gol para equipo IZQUIERDO. Score: ${state.score.left}-${state.score.right}`);
   } else {
     state.score.right++;
-    console.log(`[${roomId}] Gol para equipo DERECHO. Score: ${state.score.left}-${state.score.right}`);
+    log(`[${roomId}] Gol para equipo DERECHO. Score: ${state.score.left}-${state.score.right}`);
   }
 
   io.to(roomId).emit('goalScored', { team: scoringTeam, score: state.score });
@@ -444,14 +476,14 @@ function handleGoal(roomId, state, scoringTeam) {
   }
 
   // Si no hay victoria, programar reinicio
-  console.log(`[${roomId}] Gol anotado, pausando para reinicio...`);
+  log(`[${roomId}] Gol anotado, pausando para reinicio...`);
   // Limpiar timeout anterior por si acaso (aunque el cambio de estado debería prevenirlo)
   if (state.goalScoredTimeout) clearTimeout(state.goalScoredTimeout);
 
   state.goalScoredTimeout = setTimeout(() => {
     // Solo reiniciar si seguimos en estado GOAL_SCORED (no GAME_OVER)
     if (state.currentGameState === gameStates.GOAL_SCORED) {
-      console.log(`[${roomId}] Reiniciando juego después de gol.`);
+      log(`[${roomId}] Reiniciando juego después de gol.`);
       resetBall(state);
       resetPlayersPositions(roomId, state); // Pasar roomId
       state.currentGameState = gameStates.PLAYING; // Reanudar juego
@@ -459,7 +491,7 @@ function handleGoal(roomId, state, scoringTeam) {
       io.to(roomId).emit('gameStateInfo', { currentState: state.currentGameState, kickoffInMs: KICKOFF_FREEZE_MS }); // Notificar reanudación
       state.goalScoredTimeout = null;
     } else {
-      console.log(`[${roomId}] Reinicio cancelado, estado del juego ya es ${state.currentGameState}`);
+      log(`[${roomId}] Reinicio cancelado, estado del juego ya es ${state.currentGameState}`);
     }
   }, 3000); // 3 segundos de pausa
 }
@@ -467,7 +499,7 @@ function handleGoal(roomId, state, scoringTeam) {
 function checkPlayerOutOfBounds(state, roomId) {
   state.players.forEach(player => {
     if (Math.abs(player.position.x) > FIELD_WIDTH / 2 + 2 || Math.abs(player.position.z) > FIELD_HEIGHT / 2 + 2) {
-      console.warn(`[${roomId}] Jugador ${player.name} fuera de límites, reposicionando.`);
+      warn(`[${roomId}] Jugador ${player.name} fuera de límites, reposicionando.`);
       if (player.team) {
         player.position = getSpawnPosition(player.team);
       } else {
@@ -491,6 +523,16 @@ function updateGamePhysics(roomId, state) {
   }
 
   const kickoffFrozen = performance.now() < state.kickoffFrozenUntil;
+
+  // Reloj de partido: solo corre durante el juego activo (no en saque ni pausas).
+  if (!kickoffFrozen) {
+    state.matchTimeLeftMs -= PHYSICS_DT * 1000;
+    if (state.matchTimeLeftMs <= 0) {
+      state.matchTimeLeftMs = 0;
+      endMatchByTime(roomId, state);
+      return;
+    }
+  }
 
   // 1. Actualizar Jugadores
   state.players.forEach(player => {
@@ -570,7 +612,9 @@ function updateGamePhysics(roomId, state) {
   state.ballPosition.addInPlace(state.ballVelocity.scale(PHYSICS_DT));
 
   // Colisiones con postes de portería (autoritativas, alineadas con el cliente)
-  resolveBallGoalPostCollisions(state.ballPosition, state.ballVelocity, RESTITUTION);
+  if (resolveBallGoalPostCollisions(state.ballPosition, state.ballVelocity, RESTITUTION)) {
+    maybeEmitBounce(roomId, state);
+  }
 
   // Colisiones con bordes y Goles
   let scored = false;
@@ -606,11 +650,13 @@ function updateGamePhysics(roomId, state) {
       // NO ES GOL: Rebote normal contra la pared de fondo (fuera de portería)
       state.ballPosition.x = Math.sign(state.ballPosition.x) * (FIELD_WIDTH / 2 - BALL_RADIUS);
       state.ballVelocity.x *= -RESTITUTION;
+      maybeEmitBounce(roomId, state);
     }
   }
   if (!scored && Math.abs(state.ballPosition.z) >= FIELD_HEIGHT / 2 - BALL_RADIUS) {
     state.ballPosition.z = Math.sign(state.ballPosition.z) * (FIELD_HEIGHT / 2 - BALL_RADIUS);
     state.ballVelocity.z *= -RESTITUTION;
+    maybeEmitBounce(roomId, state);
   }
   // Arcade 2D: keep ball on ground — no vertical bounce
   state.ballPosition.y = BALL_RADIUS;
@@ -646,7 +692,7 @@ function updateGamePhysics(roomId, state) {
 
       const controlDuration = (performance.now() - player.ballControlTime) / 1000;
       if (controlDuration >= 3) {
-        console.log(`[${roomId}] ${player.name} pierde control por tiempo.`);
+        log(`[${roomId}] ${player.name} pierde control por tiempo.`);
         player.isControllingBall = false;
         playerCurrentlyControllingId = null; // Liberar control
         // Empuje en la dirección a la que mira al expirar
@@ -680,7 +726,7 @@ function updateGamePhysics(roomId, state) {
         return; // Skip collision physics for this player
       }
       
-      // console.log(`[${roomId}] Colisión física: ${player.name}`); // Log spam
+      // log(`[${roomId}] Colisión física: ${player.name}`); // Log spam
       const normal = vecToBall.normalize();
       const relativeVelocity = state.ballVelocity.subtract(player.velocity);
       const velocityAlongNormal = Vector3.Dot(relativeVelocity, normal);
@@ -722,6 +768,19 @@ function updateGamePhysics(roomId, state) {
 } // Fin de updateGamePhysics
 
 
+// Emite un evento de rebote (sonido en cliente), con throttle y umbral de velocidad.
+const BOUNCE_EMIT_COOLDOWN_MS = 110;
+const BOUNCE_MIN_SPEED = 3;
+function maybeEmitBounce(roomId, state) {
+  const speedSq = state.ballVelocity.x * state.ballVelocity.x + state.ballVelocity.z * state.ballVelocity.z;
+  if (speedSq < BOUNCE_MIN_SPEED * BOUNCE_MIN_SPEED) return;
+  const now = performance.now();
+  if (now - state.lastBounceEmit < BOUNCE_EMIT_COOLDOWN_MS) return;
+  state.lastBounceEmit = now;
+  const strength = Math.min(1, Math.sqrt(speedSq) / MAX_BALL_SPEED);
+  io.to(roomId).volatile.emit('ballBounce', { strength });
+}
+
 // --- Emisión de Estado ---
 function emitGameState(roomId, state) {
   // Crear payload solo con datos necesarios para el cliente
@@ -749,6 +808,7 @@ function emitGameState(roomId, state) {
     players: playersData,
     ballPosition: vector3ToNetObject(state.ballPosition),
     score: state.score,
+    matchTimeLeftMs: Math.round(state.matchTimeLeftMs),
     controllingPlayerId,
     controlRemainingMs,
   };
@@ -760,33 +820,38 @@ function emitGameState(roomId, state) {
 
 // --- Manejadores de Eventos de Socket.IO ---
 io.on('connection', (socket) => {
-  console.log(`++ Cliente conectado: ${socket.id}`);
+  log(`++ Cliente conectado: ${socket.id}`);
   let currentRoomId = null; // ID de la sala para este socket
+  // Anti-spam de chat: ventana deslizante por socket.
+  const chatTimestamps = [];
+  const CHAT_WINDOW_MS = 5000;
+  const CHAT_MAX_IN_WINDOW = 5; // Máx mensajes por ventana
+  const CHAT_MIN_GAP_MS = 400;  // Separación mínima entre mensajes
 
   // Handler 'joinGame'
   socket.on('joinGame', ({ name, roomId }) => {
-    console.log(`[${roomId || 'N/A'}] -> joinGame de ${socket.id} (${name})`);
+    log(`[${roomId || 'N/A'}] -> joinGame de ${socket.id} (${name})`);
 
     // Validaciones
     if (!roomId || !availableSalas.includes(roomId)) {
-      console.error(`[${roomId || 'N/A'}] Error joinGame: Sala inválida '${roomId}'`);
+      error(`[${roomId || 'N/A'}] Error joinGame: Sala inválida '${roomId}'`);
       return socket.emit('joinError', { message: 'Sala inválida.' });
     }
     const state = salaStates[roomId];
     if (!state) {
-      console.error(`[${roomId}] Error joinGame: Estado de sala no encontrado.`);
+      error(`[${roomId}] Error joinGame: Estado de sala no encontrado.`);
       return socket.emit('joinError', { message: 'Error interno del servidor.' });
     }
     const sanitizedName = sanitizeInput(name, 15); // Limitar nombre
     if (!sanitizedName) {
-      console.error(`[${roomId}] Error joinGame: Nombre inválido.`);
+      error(`[${roomId}] Error joinGame: Nombre inválido.`);
       return socket.emit('joinError', { message: 'Nombre inválido o vacío.' });
     }
     // Evitar unirse si el nombre ya está en uso en esa sala
     let nameExists = false;
     state.players.forEach(p => { if (p.name === sanitizedName) nameExists = true; });
     if (nameExists) {
-      console.error(`[${roomId}] Error joinGame: Nombre "${sanitizedName}" ya en uso.`);
+      error(`[${roomId}] Error joinGame: Nombre "${sanitizedName}" ya en uso.`);
       return socket.emit('joinError', { message: `El nombre "${sanitizedName}" ya está en uso.` });
     }
 
@@ -795,7 +860,7 @@ io.on('connection', (socket) => {
     //    return socket.emit('joinError', { message: 'La sala está llena.' });
     // }
     if (state.currentGameState === gameStates.PLAYING) {
-      console.log(`[${roomId}] Aviso joinGame: Juego en progreso para ${sanitizedName}.`);
+      log(`[${roomId}] Aviso joinGame: Juego en progreso para ${sanitizedName}.`);
       // Permitir unirse pero informar que está en progreso
       // socket.emit('gameInProgress', { score: state.score });
       // O podrías rechazar:
@@ -829,7 +894,7 @@ io.on('connection', (socket) => {
     state.players.set(socket.id, playerData);
     state.playerMovements.set(socket.id, { moveDirection: Vector3.Zero() });
 
-    console.log(`[${roomId}] Jugador ${sanitizedName} (${socket.id}) añadido y unido.`);
+    log(`[${roomId}] Jugador ${sanitizedName} (${socket.id}) añadido y unido.`);
 
     // Enviar confirmación y estado actual al nuevo jugador
     socket.emit('gameJoined', { id: socket.id, name: sanitizedName, roomId: roomId });
@@ -853,13 +918,13 @@ io.on('connection', (socket) => {
 
   // Handler 'selectTeam'
   socket.on('selectTeam', ({ team }) => {
-    if (!currentRoomId) return console.error(`[${socket.id}] Error selectTeam: Socket no está en una sala.`);
+    if (!currentRoomId) return error(`[${socket.id}] Error selectTeam: Socket no está en una sala.`);
     const state = salaStates[currentRoomId];
     const player = state.players.get(socket.id);
 
-    console.log(`[${currentRoomId}] -> selectTeam de ${player?.name || socket.id}. Equipo: ${team}`);
+    log(`[${currentRoomId}] -> selectTeam de ${player?.name || socket.id}. Equipo: ${team}`);
 
-    if (!player) return console.error(`[${currentRoomId}] Error selectTeam: Jugador ${socket.id} no encontrado.`);
+    if (!player) return error(`[${currentRoomId}] Error selectTeam: Jugador ${socket.id} no encontrado.`);
     if (team !== 'left' && team !== 'right') return socket.emit('selectTeamError', { message: 'Equipo inválido' });
     if (state.teams[team].size >= MAX_PLAYERS_PER_TEAM && !state.teams[team].has(socket.id)) {
       return socket.emit('selectTeamError', { message: 'Este equipo está lleno' });
@@ -883,7 +948,7 @@ io.on('connection', (socket) => {
     player.characterType = null; // Resetear personaje al cambiar de equipo
     player.ready = false; // Asegurar que no está listo
 
-    console.log(`[${currentRoomId}] Jugador ${player.name} movido al equipo ${team}.`);
+    log(`[${currentRoomId}] Jugador ${player.name} movido al equipo ${team}.`);
 
     // Emitir actualizaciones a la sala
     const status = getTeamStatus(state);
@@ -897,13 +962,13 @@ io.on('connection', (socket) => {
 
   // Handler 'selectCharacter'
   socket.on('selectCharacter', ({ characterType }) => {
-    if (!currentRoomId) return console.error(`[${socket.id}] Error selectCharacter: Socket no está en una sala.`);
+    if (!currentRoomId) return error(`[${socket.id}] Error selectCharacter: Socket no está en una sala.`);
     const state = salaStates[currentRoomId];
     const player = state.players.get(socket.id);
 
-    console.log(`[${currentRoomId}] -> selectCharacter de ${player?.name || socket.id}. Personaje: ${characterType}`);
+    log(`[${currentRoomId}] -> selectCharacter de ${player?.name || socket.id}. Personaje: ${characterType}`);
 
-    if (!player) return console.error(`[${currentRoomId}] Error selectCharacter: Jugador ${socket.id} no encontrado.`);
+    if (!player) return error(`[${currentRoomId}] Error selectCharacter: Jugador ${socket.id} no encontrado.`);
     if (!player.team) return socket.emit('selectCharacterError', { message: 'Selecciona un equipo primero.' });
     if (player.ready) return socket.emit('selectCharacterError', { message: 'Cancela tu estado "Listo" para cambiar.' });
 
@@ -914,7 +979,7 @@ io.on('connection', (socket) => {
     }
 
     player.characterType = characterType;
-    console.log(`[${currentRoomId}] Jugador ${player.name} personaje actualizado a: ${characterType}`);
+    log(`[${currentRoomId}] Jugador ${player.name} personaje actualizado a: ${characterType}`);
 
     // Notificar a todos (teamUpdate ahora incluye characterType)
     const status = getTeamStatus(state);
@@ -924,13 +989,13 @@ io.on('connection', (socket) => {
 
   // Handler 'toggleReady'
   socket.on('toggleReady', () => {
-    if (!currentRoomId) return console.error(`[${socket.id}] Error toggleReady: Socket no está en una sala.`);
+    if (!currentRoomId) return error(`[${socket.id}] Error toggleReady: Socket no está en una sala.`);
     const state = salaStates[currentRoomId];
     const player = state.players.get(socket.id);
 
-    console.log(`[${currentRoomId}] -> toggleReady de ${player?.name || socket.id}.`);
+    log(`[${currentRoomId}] -> toggleReady de ${player?.name || socket.id}.`);
 
-    if (!player || !player.team) return console.error(`[${currentRoomId}] Error toggleReady: Jugador no encontrado o sin equipo.`);
+    if (!player || !player.team) return error(`[${currentRoomId}] Error toggleReady: Jugador no encontrado o sin equipo.`);
     // Requerir personaje para estar listo
     if (!player.characterType && !player.ready) { // Si intenta ponerse listo sin personaje
       return socket.emit('readyError', { message: 'Debes seleccionar un personaje.' });
@@ -945,10 +1010,10 @@ io.on('connection', (socket) => {
 
     if (player.ready) {
       state.readyState[player.team].add(socket.id);
-      console.log(`[${currentRoomId}] Jugador ${player.name} está LISTO.`);
+      log(`[${currentRoomId}] Jugador ${player.name} está LISTO.`);
     } else {
       state.readyState[player.team].delete(socket.id);
-      console.log(`[${currentRoomId}] Jugador ${player.name} YA NO está listo.`);
+      log(`[${currentRoomId}] Jugador ${player.name} YA NO está listo.`);
     }
 
     // Emitir actualización de estado 'listo' a la sala
@@ -1005,7 +1070,7 @@ io.on('connection', (socket) => {
     const player = state.players.get(socket.id);
     if (!player || state.currentGameState !== gameStates.PLAYING) return;
 
-    //console.log(`[${currentRoomId}] -> ballControl de ${player.name}. Control: ${control}`);
+    //log(`[${currentRoomId}] -> ballControl de ${player.name}. Control: ${control}`);
 
     if (control === true) {
       const stats = getCharacterStats(player.characterType);
@@ -1021,15 +1086,15 @@ io.on('connection', (socket) => {
         player.isControllingBall = true;
         player.ballControlTime = performance.now();
         state.ballVelocity.set(0, 0, 0); // Detener balón
-        console.log(`[${currentRoomId}] ${player.name} INICIA control de balón.`);
+        log(`[${currentRoomId}] ${player.name} INICIA control de balón.`);
       } else {
-        //console.log(`[${currentRoomId}] ${player.name} FALLA control.`);
+        //log(`[${currentRoomId}] ${player.name} FALLA control.`);
       }
     } else if (control === false) {
       // Soltar el balón (disparo)
       if (player.isControllingBall) {
         player.isControllingBall = false;
-        console.log(`[${currentRoomId}] ${player.name} SUELTA balón (disparo).`);
+        log(`[${currentRoomId}] ${player.name} SUELTA balón (disparo).`);
 
         // Calcular dirección del disparo (hacia donde mira el jugador)
         const forward = new Vector3(0, 0, 1); // Z local
@@ -1075,7 +1140,7 @@ io.on('connection', (socket) => {
         // KEY CHANGE: Register kick time
         player.lastKickTime = nowTs;
 
-        console.log(`[${currentRoomId}] SHOT: Speed ${speed.toFixed(1)}`);
+        log(`[${currentRoomId}] SHOT: Speed ${speed.toFixed(1)}`);
       }
     }
     // El estado se emitirá en el siguiente tick de emitGameState
@@ -1091,7 +1156,19 @@ io.on('connection', (socket) => {
     const sanitizedMessage = sanitizeInput(message);
     if (!sanitizedMessage) return;
 
-    console.log(`[${currentRoomId}] Chat [${player.name}]: ${sanitizedMessage}`);
+    // Rate limiting: descarta el mensaje si supera el ritmo permitido.
+    const nowTs = Date.now();
+    while (chatTimestamps.length && nowTs - chatTimestamps[0] > CHAT_WINDOW_MS) {
+      chatTimestamps.shift();
+    }
+    const lastTs = chatTimestamps[chatTimestamps.length - 1] || 0;
+    if (nowTs - lastTs < CHAT_MIN_GAP_MS || chatTimestamps.length >= CHAT_MAX_IN_WINDOW) {
+      socket.emit('chatError', { message: 'Estás enviando mensajes demasiado rápido.' });
+      return;
+    }
+    chatTimestamps.push(nowTs);
+
+    log(`[${currentRoomId}] Chat [${player.name}]: ${sanitizedMessage}`);
     // Emitir a la sala correcta
     io.to(currentRoomId).emit('chatUpdate', {
       playerId: socket.id,
@@ -1103,7 +1180,7 @@ io.on('connection', (socket) => {
 
   // Handler 'disconnect'
   socket.on('disconnect', (reason) => {
-    console.log(`-- Cliente desconectado: ${socket.id}. Sala: ${currentRoomId || 'N/A'}. Razón: ${reason}`);
+    log(`-- Cliente desconectado: ${socket.id}. Sala: ${currentRoomId || 'N/A'}. Razón: ${reason}`);
     if (!currentRoomId) return; // Si nunca se unió a una sala
 
     const state = salaStates[currentRoomId];
@@ -1112,7 +1189,7 @@ io.on('connection', (socket) => {
     const player = state.players.get(socket.id);
 
     if (player) {
-      console.log(`[${currentRoomId}] Limpiando jugador ${player.name} (${socket.id}) por desconexión.`);
+      log(`[${currentRoomId}] Limpiando jugador ${player.name} (${socket.id}) por desconexión.`);
 
       // Quitar de equipos y estado 'listo'
       if (player.team) {
@@ -1137,7 +1214,7 @@ io.on('connection', (socket) => {
       checkGameEndOnDisconnect(currentRoomId, state);
 
     } else {
-      console.log(`[${currentRoomId}] Advertencia: Jugador ${socket.id} desconectado no encontrado en estado.`);
+      log(`[${currentRoomId}] Advertencia: Jugador ${socket.id} desconectado no encontrado en estado.`);
     }
 
     // Importante: No limpiar currentRoomId aquí, se limpia para el próximo ciclo de conexión
@@ -1159,7 +1236,7 @@ function checkGameEndOnDisconnect(roomId, state) {
   // No terminar si aún queda al menos un jugador por equipo
   if (leftCount > 0 && rightCount > 0) return;
 
-  console.log(`[${roomId}] Comprobando fin de juego por desconexión. Left: ${leftCount}, Right: ${rightCount}`);
+  log(`[${roomId}] Comprobando fin de juego por desconexión. Left: ${leftCount}, Right: ${rightCount}`);
 
   if (leftCount === 0 && rightCount > 0) {
     // Gana equipo derecho por abandono
@@ -1179,5 +1256,5 @@ function checkGameEndOnDisconnect(roomId, state) {
 // --- Inicio del Servidor HTTP ---
 const PORT = process.env.PORT || 4000;
 httpServer.listen(PORT, '0.0.0.0', () => { // Escuchar en todas las interfaces
-  console.log(`Servidor de juego corriendo en el puerto ${PORT} y escuchando en 0.0.0.0`);
+  log(`Servidor de juego corriendo en el puerto ${PORT} y escuchando en 0.0.0.0`);
 });

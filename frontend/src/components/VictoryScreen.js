@@ -3,10 +3,18 @@ import React from 'react';
 const VictoryScreen = ({ gameOverInfo, isMobile, t, onBackToLobby }) => {
   if (!gameOverInfo) return null;
 
-  const winningColor = gameOverInfo?.winningTeam === 'left' ? '#3b82f6' : '#ef4444';
-  const winnerLabel = gameOverInfo?.winningTeam === 'left'
-    ? (t('gameUI.mammalTeam') || 'MAMMALS WIN!')
-    : (t('gameUI.reptileTeam') || 'REPTILES WIN!');
+  const isDraw = !gameOverInfo?.winningTeam;
+  const winningColor = isDraw
+    ? '#e5e7eb'
+    : (gameOverInfo?.winningTeam === 'left' ? '#3b82f6' : '#ef4444');
+  let winnerLabel;
+  if (isDraw) {
+    winnerLabel = t('gameUI.draw') || 'DRAW!';
+  } else if (gameOverInfo?.winningTeam === 'left') {
+    winnerLabel = t('gameUI.mammalTeam') || 'MAMMALS WIN!';
+  } else {
+    winnerLabel = t('gameUI.reptileTeam') || 'REPTILES WIN!';
+  }
 
   return (
     <div
@@ -51,7 +59,7 @@ const VictoryScreen = ({ gameOverInfo, isMobile, t, onBackToLobby }) => {
       </div>
 
       <p style={{ fontSize: '1.2rem', color: '#aaa' }}>
-        {t('gameUI.victory') || 'VICTORY!'}
+        {isDraw ? (t('gameUI.gameOver') || 'GAME OVER') : (t('gameUI.victory') || 'VICTORY!')}
       </p>
 
       <button

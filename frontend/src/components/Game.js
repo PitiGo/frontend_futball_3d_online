@@ -12,7 +12,7 @@ import { useSearchParams } from 'react-router-dom';
 import { useControls } from '../hooks/useControls';
 import { useScene } from '../hooks/useScene';
 import { useGameSocket } from '../hooks/useGameSocket';
-import { initAudio, playGoal, playWhistle, toggleMuted, isMuted } from '../services/sound';
+import { initAudio, playGoal, playWhistle, playBounce, toggleMuted, isMuted } from '../services/sound';
 
 const MAX_CHAT_MESSAGES = 50;
 
@@ -43,14 +43,6 @@ const Game = () => {
     const availableRooms = (process.env.REACT_APP_ROOMS || '1,2').split(',').map(s => `${roomPrefix}${s.trim()}`);
     const roomId = roomParam ? `${roomPrefix}${roomParam}` : null;
 
-    // Debug logging
-    console.group('Game Component URL Parameters');
-    console.log('URL actual:', window.location.href);
-    console.log('Search params:', Object.fromEntries(searchParams));
-    console.log('Room parameter:', roomParam);
-    console.log('Computed roomId:', roomId);
-    console.groupEnd();
-
     const { t } = useTranslation();
     const canvasRef = useRef(null);
     const engineRef = useRef(null);
@@ -74,6 +66,8 @@ const Game = () => {
     const [hasJoined, setHasJoined] = useState(false);
     const [gameInProgress, setGameInProgress] = useState(false);
     const [score, setScore] = useState({ left: 0, right: 0 });
+    const [matchTimeLeft, setMatchTimeLeft] = useState(null);
+    const lastMatchSecondRef = useRef(null);
 
     const [showingEndMessage, setShowingEndMessage] = useState(false);
 
@@ -196,7 +190,6 @@ const Game = () => {
 
     const handleToggleReady = useCallback(() => {
         if (socketRef.current) {
-            console.log('Enviando toggleReady');
             socketRef.current.emit('toggleReady');
         }
     }, []);
@@ -220,6 +213,8 @@ const Game = () => {
         setConnectedPlayers,
         staminaFillRef,
         staminaContainerRef,
+        setMatchTimeLeft,
+        lastMatchSecondRef,
     }), [setConnectedPlayers]);
 
     const onSceneReady = useCallback(() => setSceneReady(true), []);
@@ -285,6 +280,8 @@ const Game = () => {
             setGameStarted(false);
             setGameInProgress(false);
             setKickoffEndsAt(null);
+            setMatchTimeLeft(null);
+            lastMatchSecondRef.current = null;
             if (gameOverData) {
                 setGameOverInfo(gameOverData);
                 setShowingEndMessage(true);
@@ -308,6 +305,7 @@ const Game = () => {
                 }, 100);
             }
         },
+        onBallBounce: () => playBounce(),
         onChatUpdate: (message) => setChatMessages((prev) => [...prev.slice(-(MAX_CHAT_MESSAGES - 1)), message]),
         onPlayersListUpdate: (list) => {
             syncPlayerMeta(playerMetaRef, list);
@@ -373,22 +371,16 @@ const Game = () => {
 
     // Validate room and redirect if invalid (usa REACT_APP_ROOMS)
     useEffect(() => {
-        console.group('Room Validation');
-        console.log('Validando sala:', roomId);
         const isValidRoom = !!roomId && availableRooms.includes(roomId);
 
         if (!isValidRoom) {
             const firstRoom = (process.env.REACT_APP_ROOMS || '1,2').split(',')[0].trim();
-            console.warn('Sala no válida, redirigiendo a', `${roomPrefix}${firstRoom}`);
             isRedirectingRef.current = true;
             setSearchParams({ room: firstRoom || '1' });
-            console.groupEnd();
             return;
         }
 
-        console.log('Sala válida:', isValidRoom);
         isRedirectingRef.current = false;
-        console.groupEnd();
     }, [roomId, setSearchParams, availableRooms, roomPrefix]);
 
     useEffect(() => {
@@ -425,24 +417,11 @@ const Game = () => {
     const handleChatSubmit = (e) => {
         e.preventDefault();
         if (chatInput.trim() && socketRef.current) {
-            console.log('Enviando mensaje de chat:', chatInput);
             socketRef.current.emit('chatMessage', chatInput);
             setChatInput('');
             setTimeout(scrollToBottom, 100);
         }
     };
-
-    // Monitor state changes
-    useEffect(() => {
-        console.log('Estado del juego actualizado:', {
-            roomId,
-            isConnected,
-            hasSocket: !!socketRef.current,
-            currentTeam,
-            teamSelected,
-            gameStarted
-        });
-    }, [roomId, isConnected, currentTeam, teamSelected, gameStarted]);
 
     // Show loading or error state if no valid room
     if (!roomId) {
@@ -522,22 +501,13 @@ const Game = () => {
 
             {!isLoading && hasJoined && !gameStarted && !showingEndMessage && (
                 <div style={{ maxHeight: '100%', overflow: 'auto' }}>
-                    {console.log('Renderizando TeamSelectionScreen:', {
-                        currentTeam,
-                        teamSelected,
-                        socketConnected: socketRef.current?.connected
-                    })}
                     <TeamSelectionScreen
                         debug={true}
                         onTeamSelect={handleTeamSelect}
                         onCharacterSelect={(characterType) => {
-                            console.log('Intentando seleccionar personaje:', characterType);
                             if (socketRef.current?.connected) {
                                 setSelectedCharacter(characterType);
                                 socketRef.current.emit('selectCharacter', { characterType });
-                                console.log('Evento selectCharacter emitido al servidor');
-                            } else {
-                                console.error('Socket no disponible o desconectado');
                             }
                         }}
                         teams={teams}
@@ -564,6 +534,29 @@ const Game = () => {
 
             {kickoffEndsAt && gameStarted && (
                 <KickoffCountdown kickoffEndsAt={kickoffEndsAt} isMobile={isMobile} />
+            )}
+
+            {/* Temporizador de partido */}
+            {gameStarted && teamSelected && matchTimeLeft != null && (
+                <div style={{
+                    position: 'absolute',
+                    top: isMobile ? '44px' : '8px',
+                    left: '50%',
+                    transform: 'translateX(-50%)',
+                    backgroundColor: matchTimeLeft <= 10 ? 'rgba(239, 68, 68, 0.85)' : 'rgba(0, 0, 0, 0.6)',
+                    color: 'white',
+                    padding: isMobile ? '2px 10px' : '4px 14px',
+                    borderRadius: '8px',
+                    fontSize: isMobile ? '16px' : '20px',
+                    fontWeight: 800,
+                    fontVariantNumeric: 'tabular-nums',
+                    letterSpacing: '1px',
+                    zIndex: 60,
+                    pointerEvents: 'none',
+                    boxShadow: '0 2px 10px rgba(0,0,0,0.3)',
+                }}>
+                    {`${Math.floor(matchTimeLeft / 60)}:${String(matchTimeLeft % 60).padStart(2, '0')}`}
+                </div>
             )}
 
             {/* Barra de Stamina (sprint) — actualizada vía ref desde updateGameState */}
