@@ -62,6 +62,50 @@ const VictoryScreen = ({ gameOverInfo, isMobile, t, onBackToLobby }) => {
         {isDraw ? (t('gameUI.gameOver') || 'GAME OVER') : (t('gameUI.victory') || 'VICTORY!')}
       </p>
 
+      {gameOverInfo?.mvp && (
+        <div style={{
+          marginTop: '14px',
+          padding: '8px 18px',
+          borderRadius: '10px',
+          backgroundColor: 'rgba(250, 204, 21, 0.15)',
+          border: '1px solid rgba(250, 204, 21, 0.5)',
+          color: '#facc15',
+          fontWeight: 'bold',
+          fontSize: isMobile ? '1rem' : '1.2rem',
+        }}>
+          {`${t('gameUI.mvp') || 'MVP'}: ${gameOverInfo.mvp.name} (${gameOverInfo.mvp.goals})`}
+        </div>
+      )}
+
+      {Array.isArray(gameOverInfo?.scorers) && gameOverInfo.scorers.length > 0 && (
+        <div style={{
+          marginTop: '14px',
+          maxHeight: isMobile ? '120px' : '180px',
+          overflowY: 'auto',
+          minWidth: isMobile ? '200px' : '260px',
+        }}>
+          <div style={{ fontSize: '0.85rem', color: '#9ca3af', textAlign: 'center', marginBottom: '6px', textTransform: 'uppercase', letterSpacing: '1px' }}>
+            {t('gameUI.scorers') || 'Scorers'}
+          </div>
+          {gameOverInfo.scorers.map((s) => (
+            <div
+              key={s.id}
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                gap: '16px',
+                padding: '3px 10px',
+                fontSize: '0.95rem',
+                color: s.team === 'left' ? '#93c5fd' : '#fca5a5',
+              }}
+            >
+              <span>{s.name}</span>
+              <span style={{ fontWeight: 'bold' }}>{`⚽ ${s.goals}`}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
       <button
         type="button"
         onClick={onBackToLobby}

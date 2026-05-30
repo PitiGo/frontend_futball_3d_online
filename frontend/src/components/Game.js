@@ -68,6 +68,10 @@ const Game = () => {
     const [score, setScore] = useState({ left: 0, right: 0 });
     const [matchTimeLeft, setMatchTimeLeft] = useState(null);
     const lastMatchSecondRef = useRef(null);
+    const [ping, setPing] = useState(null);
+    const [connectionStatus, setConnectionStatus] = useState('connected');
+    const chargeFillRef = useRef(null);
+    const chargeContainerRef = useRef(null);
 
     const [showingEndMessage, setShowingEndMessage] = useState(false);
 
@@ -215,6 +219,8 @@ const Game = () => {
         staminaContainerRef,
         setMatchTimeLeft,
         lastMatchSecondRef,
+        chargeFillRef,
+        chargeContainerRef,
     }), [setConnectedPlayers]);
 
     const onSceneReady = useCallback(() => setSceneReady(true), []);
@@ -259,9 +265,20 @@ const Game = () => {
             setGameStarted(true);
             setGameInProgress(true);
         },
-        onGoalScored: ({ team, score: newScore }) => {
+        onPing: (rtt) => setPing((prev) => (prev == null || Math.abs(prev - rtt) >= 8 ? rtt : prev)),
+        onConnectionStatus: (status) => {
+            setConnectionStatus(status);
+            setIsConnected(status === 'connected');
+        },
+        onGoalScored: ({ team, score: newScore, scorerName, ownGoal }) => {
             setScore(newScore);
             playGoal();
+            if (scorerName) {
+                const label = ownGoal
+                    ? `${t('gameUI.ownGoal')}: ${scorerName}`
+                    : `${t('gameUI.goalBy')}: ${scorerName}`;
+                setToast({ message: label, type: 'info' });
+            }
             if (scoreTextRef.current) {
                 scoreTextRef.current.left.text = (newScore.left || 0).toString();
                 scoreTextRef.current.right.text = (newScore.right || 0).toString();
@@ -536,11 +553,49 @@ const Game = () => {
                 <KickoffCountdown kickoffEndsAt={kickoffEndsAt} isMobile={isMobile} />
             )}
 
+            {/* Indicador de ping / estado de conexión */}
+            {hasJoined && (
+                <div style={{
+                    position: 'absolute',
+                    bottom: isMobile ? '4px' : '6px',
+                    right: '6px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '5px',
+                    backgroundColor: 'rgba(0,0,0,0.55)',
+                    padding: '3px 8px',
+                    borderRadius: '6px',
+                    fontSize: '11px',
+                    fontVariantNumeric: 'tabular-nums',
+                    color: 'white',
+                    zIndex: 55,
+                    pointerEvents: 'none',
+                }}>
+                    {connectionStatus === 'reconnecting' ? (
+                        <span style={{ color: '#fbbf24' }}>{t('gameUI.reconnecting')}</span>
+                    ) : connectionStatus === 'disconnected' ? (
+                        <span style={{ color: '#ef4444' }}>{t('gameUI.disconnected')}</span>
+                    ) : (
+                        <>
+                            <span style={{
+                                width: '8px',
+                                height: '8px',
+                                borderRadius: '50%',
+                                backgroundColor: ping == null ? '#9ca3af' : ping < 80 ? '#22c55e' : ping < 160 ? '#fbbf24' : '#ef4444',
+                            }} />
+                            <span>{ping == null ? '—' : `${ping} ms`}</span>
+                        </>
+                    )}
+                </div>
+            )}
+
             {/* Temporizador de partido */}
             {gameStarted && teamSelected && matchTimeLeft != null && (
                 <div style={{
                     position: 'absolute',
-                    top: isMobile ? '44px' : '8px',
+                    // Placed below the scoreboard (desktop Babylon board / mobile HUD)
+                    // so the match clock never overlaps the score.
+                    top: '58px',
                     left: '50%',
                     transform: 'translateX(-50%)',
                     backgroundColor: matchTimeLeft <= 10 ? 'rgba(239, 68, 68, 0.85)' : 'rgba(0, 0, 0, 0.6)',
@@ -556,6 +611,51 @@ const Game = () => {
                     boxShadow: '0 2px 10px rgba(0,0,0,0.3)',
                 }}>
                     {`${Math.floor(matchTimeLeft / 60)}:${String(matchTimeLeft % 60).padStart(2, '0')}`}
+                </div>
+            )}
+
+            {/* Barra de carga de disparo — visible solo al controlar el balón */}
+            {gameStarted && teamSelected && (
+                <div
+                    ref={chargeContainerRef}
+                    style={{
+                        position: 'absolute',
+                        bottom: isMobile ? '42px' : '54px',
+                        left: '50%',
+                        transform: 'translateX(-50%)',
+                        width: isMobile ? '150px' : '220px',
+                        zIndex: 50,
+                        pointerEvents: 'none',
+                        display: 'none'
+                    }}
+                >
+                    <div style={{
+                        fontSize: '10px',
+                        color: 'white',
+                        textAlign: 'center',
+                        marginBottom: '3px',
+                        letterSpacing: '1px',
+                        textShadow: '0 1px 2px rgba(0,0,0,0.6)'
+                    }}>
+                        {t('gameUI.shotPower')}
+                    </div>
+                    <div style={{
+                        height: '10px',
+                        background: 'rgba(0,0,0,0.5)',
+                        borderRadius: '6px',
+                        overflow: 'hidden',
+                        border: '1px solid rgba(255,255,255,0.25)'
+                    }}>
+                        <div
+                            ref={chargeFillRef}
+                            style={{
+                                height: '100%',
+                                width: '0%',
+                                background: 'linear-gradient(90deg, #f59e0b, #ef4444)',
+                                transition: 'width 0.1s linear'
+                            }}
+                        />
+                    </div>
                 </div>
             )}
 

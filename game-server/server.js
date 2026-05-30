@@ -148,6 +148,8 @@ availableSalas.forEach(roomId => {
     kickoffFrozenUntil: 0,
     matchTimeLeftMs: MATCH_DURATION_MS, // Tiempo restante; solo baja en PLAYING activo
     lastBounceEmit: 0, // Throttle para el evento de sonido de rebote
+    lastShooter: null, // { id, team } del último jugador que impulsó el balón (atribución de goles)
+    scorers: new Map(), // id -> { name, team, goals } acumulado del partido (sobrevive a desconexiones)
   };
 });
 
@@ -209,11 +211,24 @@ function resetBall(state) {
   state.ballVelocity.set(0, 0, 0);
 }
 
-function resetPlayersPositions(roomId, state) {
-  log(`[${roomId}] Reposicionando jugadores.`);
+// kickoffTeam: equipo que saca (recibió el gol). Se le coloca un jugador cerca
+// del centro para darle la posesión inicial; el rival arranca más retrasado.
+function resetPlayersPositions(roomId, state, kickoffTeam = null) {
+  log(`[${roomId}] Reposicionando jugadores.${kickoffTeam ? ` Saque: ${kickoffTeam}` : ''}`);
+  const kickoffAssigned = { left: false, right: false };
   state.players.forEach((player) => {
     if (player.team) {
-      player.position = getSpawnPosition(player.team);
+      const side = player.team === 'left' ? -1 : 1;
+      if (kickoffTeam && player.team === kickoffTeam && !kickoffAssigned[player.team]) {
+        // Primer jugador del equipo que saca: junto al círculo central.
+        player.position = new Vector3(side * 2.5, PLAYER_RADIUS, (Math.random() - 0.5) * 4);
+        kickoffAssigned[player.team] = true;
+      } else if (kickoffTeam && player.team !== kickoffTeam) {
+        // Equipo que anotó: retrocede a su propio campo (no contesta el saque).
+        player.position = new Vector3(side * (FIELD_WIDTH / 3), PLAYER_RADIUS, (Math.random() - 0.5) * (FIELD_HEIGHT * 0.8));
+      } else {
+        player.position = getSpawnPosition(player.team);
+      }
     } else {
       // Posición central si aún no tiene equipo (raro en este punto)
       player.position.set(0, PLAYER_RADIUS, (Math.random() - 0.5) * 5);
@@ -323,6 +338,9 @@ function startGame(roomId, state) {
   state.score = { left: 0, right: 0 };
   state.gameOverData = null; // Limpiar datos de juego anterior
   state.matchTimeLeftMs = MATCH_DURATION_MS; // Reiniciar reloj de partido
+  state.scorers = new Map(); // Reiniciar estadísticas de goleadores
+  state.lastShooter = null;
+  state.players.forEach((p) => { p.goals = 0; });
   resetBall(state);
   resetPlayersPositions(roomId, state); // Pasar roomId para emitir estado inicial
   io.to(roomId).emit('gameStart'); // Avisar a los clientes
@@ -367,7 +385,11 @@ function stopGame(roomId, state, reason, finalScore, winningTeam) {
   }
 
   state.currentGameState = gameStates.GAME_OVER;
-  state.gameOverData = { reason, finalScore, winningTeam, goalsToWin: GOALS_TO_WIN };
+  const scorers = Array.from(state.scorers.values())
+    .filter((s) => s.goals > 0)
+    .sort((a, b) => b.goals - a.goals);
+  const mvp = scorers.length > 0 ? scorers[0] : null;
+  state.gameOverData = { reason, finalScore, winningTeam, goalsToWin: GOALS_TO_WIN, scorers, mvp };
 
   // Resetear estado 'listo' de jugadores
   state.players.forEach(player => {
@@ -446,6 +468,19 @@ function resetFullRoomState(roomId, state) {
   log(`[${roomId}] Estado de sala reiniciado a WAITING. Eventos emitidos.`);
 }
 
+// Acumula un gol para un jugador en las estadísticas del partido.
+function creditGoal(state, playerId, name, team) {
+  const existing = state.scorers.get(playerId);
+  if (existing) {
+    existing.goals += 1;
+    existing.name = name || existing.name;
+  } else {
+    state.scorers.set(playerId, { id: playerId, name: name || 'Unknown', team, goals: 1 });
+  }
+  const player = state.players.get(playerId);
+  if (player) player.goals = (player.goals || 0) + 1;
+}
+
 function handleGoal(roomId, state, scoringTeam) {
   // Doble chequeo por si acaso
   if (state.currentGameState !== gameStates.PLAYING) {
@@ -463,7 +498,24 @@ function handleGoal(roomId, state, scoringTeam) {
     log(`[${roomId}] Gol para equipo DERECHO. Score: ${state.score.left}-${state.score.right}`);
   }
 
-  io.to(roomId).emit('goalScored', { team: scoringTeam, score: state.score });
+  // Atribución del gol al último jugador que impulsó el balón.
+  let scorerName = null;
+  let ownGoal = false;
+  const shooter = state.lastShooter;
+  if (shooter) {
+    const shooterPlayer = state.players.get(shooter.id);
+    const shooterName = shooterPlayer ? shooterPlayer.name : (state.scorers.get(shooter.id)?.name || null);
+    if (shooter.team === scoringTeam) {
+      creditGoal(state, shooter.id, shooterName, scoringTeam);
+      scorerName = shooterName;
+    } else {
+      // El balón entró en su propia portería: autogol (no se acredita).
+      ownGoal = true;
+      scorerName = shooterName;
+    }
+  }
+
+  io.to(roomId).emit('goalScored', { team: scoringTeam, score: state.score, scorerName, ownGoal });
 
   // Comprobar victoria ANTES de reiniciar
   if (state.score.left >= GOALS_TO_WIN) {
@@ -485,7 +537,10 @@ function handleGoal(roomId, state, scoringTeam) {
     if (state.currentGameState === gameStates.GOAL_SCORED) {
       log(`[${roomId}] Reiniciando juego después de gol.`);
       resetBall(state);
-      resetPlayersPositions(roomId, state); // Pasar roomId
+      // Saque para el equipo que recibió el gol (ventaja de posesión).
+      const concedingTeam = scoringTeam === 'left' ? 'right' : 'left';
+      state.lastShooter = null;
+      resetPlayersPositions(roomId, state, concedingTeam); // Pasar roomId
       state.currentGameState = gameStates.PLAYING; // Reanudar juego
       state.kickoffFrozenUntil = performance.now() + KICKOFF_FREEZE_MS;
       io.to(roomId).emit('gameStateInfo', { currentState: state.currentGameState, kickoffInMs: KICKOFF_FREEZE_MS }); // Notificar reanudación
@@ -692,18 +747,24 @@ function updateGamePhysics(roomId, state) {
 
       const controlDuration = (performance.now() - player.ballControlTime) / 1000;
       if (controlDuration >= 3) {
-        log(`[${roomId}] ${player.name} pierde control por tiempo.`);
+        log(`[${roomId}] ${player.name} libera disparo a máxima carga (control expirado).`);
         player.isControllingBall = false;
         playerCurrentlyControllingId = null; // Liberar control
-        // Empuje en la dirección a la que mira al expirar
+        // Carga máxima: dispara con la máxima potencia en la dirección de mira.
         const forward = new Vector3(0, 0, 1);
         const rotationMatrix = new Matrix();
         player.rotation.toRotationMatrix(rotationMatrix);
         const worldForward = Vector3.TransformNormal(forward, rotationMatrix).normalize();
         worldForward.y = 0;
         if (worldForward.lengthSquared() > 0.001) worldForward.normalize();
-        const expireSpeed = 6; // menor que un disparo manual
-        state.ballVelocity = worldForward.scale(expireSpeed);
+        const fullStats = getCharacterStats(player.characterType);
+        const fullSpeed = BALL_RELEASE_MAX * fullStats.shotMultiplier;
+        state.ballVelocity = worldForward.scale(fullSpeed);
+        state.ballLastShotTime = performance.now();
+        state.lastShooter = { id: player.id, team: player.team };
+        player.lastKickTime = performance.now();
+        const sep = (fullStats.radius || PLAYER_RADIUS) + BALL_RADIUS + 0.8;
+        state.ballPosition.addInPlace(worldForward.clone().scale(sep));
       } else {
         // Mantener pelota al frente
         const forward = new Vector3(0, 0, 1); // Local Z+
@@ -794,13 +855,16 @@ function emitGameState(roomId, state) {
     isSprinting: p.isSprinting,
   }));
 
-  // Calcular jugador que controla y tiempo restante
+  // Calcular jugador que controla, tiempo restante y carga del disparo (0..1)
   let controllingPlayerId = null;
   let controlRemainingMs = 0;
+  let shotCharge = 0;
   state.players.forEach(p => {
     if (p.isControllingBall) {
       controllingPlayerId = p.id;
-      controlRemainingMs = Math.round(Math.max(0, 3000 - (performance.now() - p.ballControlTime)));
+      const elapsed = performance.now() - p.ballControlTime;
+      controlRemainingMs = Math.round(Math.max(0, 3000 - elapsed));
+      shotCharge = Math.round(Math.min(1, Math.max(0, elapsed / 3000)) * 100) / 100;
     }
   });
 
@@ -811,6 +875,7 @@ function emitGameState(roomId, state) {
     matchTimeLeftMs: Math.round(state.matchTimeLeftMs),
     controllingPlayerId,
     controlRemainingMs,
+    shotCharge,
   };
 
   // Emitir a la sala específica
@@ -822,6 +887,11 @@ function emitGameState(roomId, state) {
 io.on('connection', (socket) => {
   log(`++ Cliente conectado: ${socket.id}`);
   let currentRoomId = null; // ID de la sala para este socket
+  // Medición de latencia: el cliente envía su timestamp y lo devolvemos tal cual.
+  socket.on('pingCheck', (clientTime) => {
+    socket.emit('pongCheck', clientTime);
+  });
+
   // Anti-spam de chat: ventana deslizante por socket.
   const chatTimestamps = [];
   const CHAT_WINDOW_MS = 5000;
@@ -889,6 +959,7 @@ io.on('connection', (socket) => {
       wantSprint: false,      // Input de sprint del jugador
       isSprinting: false,     // Estado real de sprint (resuelto en física)
       exhausted: false,       // Latch: bloquea sprint hasta recuperar stamina
+      goals: 0,               // Goles anotados en el partido actual
       roomId: roomId // Referencia a su sala
     };
     state.players.set(socket.id, playerData);
@@ -1131,6 +1202,7 @@ io.on('connection', (socket) => {
         // Assign velocity
         state.ballVelocity = worldForward.scale(speed);
         state.ballLastShotTime = nowTs;
+        state.lastShooter = { id: player.id, team: player.team }; // Atribución de gol
 
         // KEY CHANGE: Aggressive separation
         // Push ball 0.8 units (before 0.1) to ensure it doesn't touch the body

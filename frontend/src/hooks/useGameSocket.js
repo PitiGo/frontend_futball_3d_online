@@ -113,6 +113,26 @@ export function useGameSocket({
     socket.on('readyError', handleReadyError);
     socket.on('chatError', handleChatError);
 
+    // --- Latencia y estado de conexión ---
+    const handlePong = (clientTime) => {
+      const rtt = Date.now() - clientTime;
+      cb().onPing?.(rtt);
+    };
+    const handleDisconnect = () => cb().onConnectionStatus?.('disconnected');
+    const handleReconnectAttempt = () => cb().onConnectionStatus?.('reconnecting');
+    const handleReconnect = () => cb().onConnectionStatus?.('connected');
+
+    socket.on('pongCheck', handlePong);
+    socket.on('disconnect', handleDisconnect);
+    socket.io.on('reconnect_attempt', handleReconnectAttempt);
+    socket.io.on('reconnect', handleReconnect);
+
+    // Sondeo de ping cada 2s (solo si está conectado).
+    const pingInterval = setInterval(() => {
+      if (socket.connected) socket.emit('pingCheck', Date.now());
+    }, 2000);
+    if (socket.connected) socket.emit('pingCheck', Date.now());
+
     const engine = engineRef.current;
     if (engine && !engine.isPointerLock) {
       engine.runRenderLoop(() => {
@@ -123,6 +143,11 @@ export function useGameSocket({
     }
 
     return () => {
+      clearInterval(pingInterval);
+      socket.off('pongCheck', handlePong);
+      socket.off('disconnect', handleDisconnect);
+      socket.io.off('reconnect_attempt', handleReconnectAttempt);
+      socket.io.off('reconnect', handleReconnect);
       socket.off('connect', handleConnect);
       socket.off('connect_error', handleConnectError);
       socket.off('teamSelected', handleTeamSelected);

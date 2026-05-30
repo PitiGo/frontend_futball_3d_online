@@ -38,6 +38,8 @@ export function createUpdateGameState(refs) {
     staminaContainerRef,
     setMatchTimeLeft,
     lastMatchSecondRef,
+    chargeFillRef,
+    chargeContainerRef,
   } = refs;
 
   // Closure state to detect sudden ball acceleration (kicks/shots) for SFX.
@@ -57,6 +59,7 @@ export function createUpdateGameState(refs) {
       controllingPlayerId,
       controlRemainingMs,
       matchTimeLeftMs,
+      shotCharge,
     } = gameState;
     const isMobileView = isMobileRef.current;
 
@@ -259,6 +262,18 @@ export function createUpdateGameState(refs) {
           : 'none';
       } else {
         staminaContainerRef.current.style.display = 'none';
+      }
+    }
+
+    // Update local player's shot charge bar (visible only while controlling the ball).
+    if (chargeFillRef?.current && chargeContainerRef?.current) {
+      const selfId = socketRef.current?.id;
+      if (selfId && controllingPlayerId === selfId) {
+        const fraction = Math.max(0, Math.min(1, typeof shotCharge === 'number' ? shotCharge : 0));
+        chargeContainerRef.current.style.display = 'block';
+        chargeFillRef.current.style.width = `${(fraction * 100).toFixed(1)}%`;
+      } else {
+        chargeContainerRef.current.style.display = 'none';
       }
     }
   };
