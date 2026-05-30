@@ -13,6 +13,7 @@ import { useControls } from '../hooks/useControls';
 import { useScene } from '../hooks/useScene';
 import { useGameSocket } from '../hooks/useGameSocket';
 import { initAudio, playGoal, playWhistle, toggleMuted, isMuted } from '../services/sound';
+import { createPlayerSync } from '../scene/playerSync';
 
 const MAX_CHAT_MESSAGES = 50;
 
@@ -63,6 +64,10 @@ const Game = () => {
     const scoreTextRef = useRef(null);
     const staminaFillRef = useRef(null);
     const staminaContainerRef = useRef(null);
+    const playerSyncRef = useRef(null);
+    if (!playerSyncRef.current) playerSyncRef.current = createPlayerSync();
+    const localInputRef = useRef({ x: 0, z: 0, sprint: false });
+    const kickoffEndsAtRef = useRef(null);
     const [muted, setMuted] = useState(isMuted());
     const [playerName, setPlayerName] = useState(null);
     const [isConnected, setIsConnected] = useState(false);
@@ -182,6 +187,7 @@ const Game = () => {
 
     useEffect(() => { sceneReadyRef.current = sceneReady; }, [sceneReady]);
     useEffect(() => { isMobileRef.current = isMobile; }, [isMobile]);
+    useEffect(() => { kickoffEndsAtRef.current = kickoffEndsAt; }, [kickoffEndsAt]);
 
     const chatInputFocusRef = useRef(false);
     const chatMessagesRef = useRef(null);
@@ -192,6 +198,7 @@ const Game = () => {
         gameStarted,
         isConnected,
         chatInputFocusRef,
+        localInputRef,
     });
 
     const handleToggleReady = useCallback(() => {
@@ -220,6 +227,9 @@ const Game = () => {
         setConnectedPlayers,
         staminaFillRef,
         staminaContainerRef,
+        playerSyncRef,
+        localInputRef,
+        kickoffEndsAtRef,
     }), [setConnectedPlayers]);
 
     const onSceneReady = useCallback(() => setSceneReady(true), []);
@@ -263,6 +273,7 @@ const Game = () => {
         onGameStart: () => {
             setGameStarted(true);
             setGameInProgress(true);
+            playerSyncRef.current?.resetLocal();
         },
         onGoalScored: ({ team, score: newScore }) => {
             setScore(newScore);
@@ -356,6 +367,7 @@ const Game = () => {
         setCurrentTeam(null);
         setSelectedCharacter(null);
         resetMovement();
+        playerSyncRef.current?.reset();
     }, [resetMovement]);
 
     const scrollToBottom = () => {

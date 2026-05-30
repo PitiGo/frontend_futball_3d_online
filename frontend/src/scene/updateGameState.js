@@ -3,20 +3,11 @@ import * as GUI from '@babylonjs/gui';
 import { getPlayerVisualY } from '../constants/characterStats';
 import { playKick } from '../services/sound';
 
-const SNAP_DISTANCE = 3;
-const LERP_ALPHA = 0.15;
-
 // Stamina bar colors by remaining fraction.
 function staminaColor(fraction) {
   if (fraction > 0.5) return 'linear-gradient(90deg, #22c55e, #86efac)';
   if (fraction > 0.2) return 'linear-gradient(90deg, #f59e0b, #fcd34d)';
   return 'linear-gradient(90deg, #ef4444, #fca5a5)';
-}
-
-function lerpToward(current, target) {
-  const dist = BABYLON.Vector3.Distance(current, target);
-  const alpha = dist > SNAP_DISTANCE ? 1.0 : LERP_ALPHA;
-  return BABYLON.Vector3.Lerp(current, target, alpha);
 }
 
 export function createUpdateGameState(refs) {
@@ -36,6 +27,7 @@ export function createUpdateGameState(refs) {
     setConnectedPlayers,
     staminaFillRef,
     staminaContainerRef,
+    playerSyncRef,
   } = refs;
 
   // Closure state to detect sudden ball acceleration (kicks/shots) for SFX.
@@ -114,26 +106,9 @@ export function createUpdateGameState(refs) {
         if (playerInstance) {
           const meta = playerMetaRef.current[playerData.id] || {};
           const characterType = playerData.characterType || meta.characterType;
-          const visualY = getPlayerVisualY(characterType);
-          const currentPosition = playerInstance.position;
-          const targetPosition = new BABYLON.Vector3(
-            playerData.position.x,
-            visualY,
-            playerData.position.z,
-          );
-
-          playerInstance.position = lerpToward(currentPosition, targetPosition);
-
-          const deltaX = targetPosition.x - currentPosition.x;
-          const deltaZ = targetPosition.z - currentPosition.z;
-          if (Math.abs(deltaX) > 0.01 || Math.abs(deltaZ) > 0.01) {
-            const angle = Math.atan2(deltaX, deltaZ);
-            playerInstance.rotation.y = BABYLON.Scalar.Lerp(
-              playerInstance.rotation.y,
-              angle,
-              0.1,
-            );
-          }
+          // Keep the constant ground height here; X/Z + rotation are applied
+          // per-frame by the prediction/interpolation loop in createGameScene.
+          playerInstance.position.y = getPlayerVisualY(characterType);
 
           characterManagerRef.current.updatePlayerAnimation(
             playerData.id,
@@ -174,21 +149,8 @@ export function createUpdateGameState(refs) {
       prevBallPos = { x: ballPosition.x, z: ballPosition.z };
     }
 
-    if (ballRef.current && ballPosition) {
-      const currentPosition = ballRef.current.position;
-      const targetPosition = new BABYLON.Vector3(
-        ballPosition.x,
-        ballPosition.y || 0.5,
-        ballPosition.z,
-      );
-      const velocity = targetPosition.subtract(currentPosition);
-      const speed = velocity.length();
-      const rotationAxis = BABYLON.Vector3.Cross(BABYLON.Vector3.Up(), velocity.normalize());
-      if (speed > 0.01) {
-        ballRef.current.rotate(rotationAxis, speed * 8, BABYLON.Space.WORLD);
-      }
-      ballRef.current.position = lerpToward(currentPosition, targetPosition);
-    }
+    // Ball position + rolling are applied per-frame in createGameScene from the
+    // interpolation buffer; here we only feed the authoritative snapshot below.
 
     if (scoreTextRef.current && score) {
       scoreTextRef.current.left.text = (score.left ?? 0).toString();
@@ -224,6 +186,11 @@ export function createUpdateGameState(refs) {
 
     if (connectedPlayers) {
       setConnectedPlayers(connectedPlayers);
+    }
+
+    // Feed authoritative snapshot into the netcode buffers (prediction + interpolation).
+    if (playerSyncRef?.current) {
+      playerSyncRef.current.ingest(gameState, socketRef.current?.id, performance.now());
     }
 
     // Update local player's stamina bar (direct DOM write to avoid 20Hz React re-renders).

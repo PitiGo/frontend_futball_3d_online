@@ -10,7 +10,7 @@ const vectorsApproximatelyEqual = (a, b, epsilon = VECTOR_EPSILON) =>
 /**
  * Keyboard + keepalive movement for the local player.
  */
-export function useControls({ socketRef, gameStarted, isConnected, chatInputFocusRef }) {
+export function useControls({ socketRef, gameStarted, isConnected, chatInputFocusRef, localInputRef }) {
   const keysPressed = useRef({ up: false, down: false, left: false, right: false });
   const joystickMoveRef = useRef({ x: 0, z: 0 });
   const lastEmittedMoveRef = useRef({ x: 0, z: 0 });
@@ -37,6 +37,11 @@ export function useControls({ socketRef, gameStarted, isConnected, chatInputFocu
     const length = Math.hypot(moveX, moveZ);
     const move = length > 0 ? { x: moveX / length, z: moveZ / length } : { x: 0, z: 0 };
 
+    // Expose the current input for client-side prediction.
+    if (localInputRef) {
+      localInputRef.current = { x: move.x, z: move.z, sprint: sprintActiveRef.current };
+    }
+
     const now = performance.now();
     const vectorChanged = !vectorsApproximatelyEqual(move, lastEmittedMoveRef.current);
     const shouldEmit =
@@ -48,18 +53,21 @@ export function useControls({ socketRef, gameStarted, isConnected, chatInputFocu
       lastEmittedMoveRef.current = move;
       lastEmitTimeRef.current = now;
     }
-  }, [socketRef]);
+  }, [socketRef, localInputRef]);
 
   const setSprint = useCallback(
     (active) => {
       const next = !!active;
       if (next === sprintActiveRef.current) return;
       sprintActiveRef.current = next;
+      if (localInputRef?.current) {
+        localInputRef.current = { ...localInputRef.current, sprint: next };
+      }
       if (socketRef.current) {
         socketRef.current.emit('sprint', { active: next });
       }
     },
-    [socketRef]
+    [socketRef, localInputRef]
   );
 
   const handleDirectionChange = useCallback(
@@ -180,7 +188,8 @@ export function useControls({ socketRef, gameStarted, isConnected, chatInputFocu
     keysPressed.current = { up: false, down: false, left: false, right: false };
     joystickMoveRef.current = { x: 0, z: 0 };
     setSprint(false);
-  }, [setSprint]);
+    if (localInputRef) localInputRef.current = { x: 0, z: 0, sprint: false };
+  }, [setSprint, localInputRef]);
 
   return { handleDirectionChange, sendMovement, resetMovement, setSprint };
 }

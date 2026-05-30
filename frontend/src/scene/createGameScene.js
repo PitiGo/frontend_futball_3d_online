@@ -463,6 +463,65 @@ export function createGameScene(canvas, { refs, isMobileRef, onSceneReady, onLoa
             refs.scoreTextRef.current = createScoreDisplay(advancedTexture);
         }
 
+        // --- Netcode application loop: prediction (local) + interpolation (remote/ball) ---
+        const UP = BABYLON.Vector3.Up();
+        scene.registerBeforeRender(() => {
+            const sync = refs.playerSyncRef?.current;
+            if (!sync) return;
+
+            const dt = Math.min(0.05, engine.getDeltaTime() / 1000);
+            const now = performance.now();
+            const renderTime = now - sync.constants.INTERP_DELAY_MS;
+            const localId = refs.socketRef.current?.id;
+            const { ROTATION_LERP, MOVE_EPSILON_SQ } = sync.constants;
+
+            const applyMesh = (mesh, target) => {
+                if (!mesh || !target) return;
+                const dx = target.x - mesh.position.x;
+                const dz = target.z - mesh.position.z;
+                mesh.position.x = target.x;
+                mesh.position.z = target.z;
+                if (dx * dx + dz * dz > MOVE_EPSILON_SQ) {
+                    const angle = Math.atan2(dx, dz);
+                    mesh.rotation.y = BABYLON.Scalar.LerpAngle(mesh.rotation.y, angle, ROTATION_LERP);
+                }
+            };
+
+            // Local player: client-side prediction.
+            if (localId && refs.playersRef.current[localId]) {
+                const frozen = !!(refs.kickoffEndsAtRef?.current && Date.now() < refs.kickoffEndsAtRef.current);
+                const input = refs.localInputRef?.current || { x: 0, z: 0, sprint: false };
+                const predicted = sync.stepLocal(dt, input, frozen);
+                if (predicted) applyMesh(refs.playersRef.current[localId], predicted);
+            }
+
+            // Remote players: entity interpolation.
+            Object.keys(refs.playersRef.current).forEach((id) => {
+                if (id === localId) return;
+                const target = sync.getRemote(id, renderTime);
+                if (target) applyMesh(refs.playersRef.current[id], target);
+            });
+
+            // Ball: interpolation + rolling rotation from displacement.
+            const ballMesh = refs.ballRef.current;
+            if (ballMesh) {
+                const target = sync.getBall(renderTime);
+                if (target) {
+                    const dx = target.x - ballMesh.position.x;
+                    const dz = target.z - ballMesh.position.z;
+                    const speed = Math.hypot(dx, dz);
+                    if (speed > 0.01) {
+                        const dir = new BABYLON.Vector3(dx, 0, dz).normalize();
+                        const axis = BABYLON.Vector3.Cross(UP, dir);
+                        ballMesh.rotate(axis, speed * 8, BABYLON.Space.WORLD);
+                    }
+                    ballMesh.position.x = target.x;
+                    if (target.y != null) ballMesh.position.y = target.y;
+                    ballMesh.position.z = target.z;
+                }
+            }
+        });
+
         refs.sceneRef.current.registerBeforeRender(() => {
             if (refs.ballRef.current && refs.controlEffectsRef.current) {
                 refs.controlEffectsRef.current.ballHalo.position = refs.ballRef.current.position.clone();

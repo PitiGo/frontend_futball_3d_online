@@ -10,6 +10,15 @@ export function getCharacterStats(characterType) {
   return CHARACTER_STATS[characterType] || CHARACTER_STATS.player;
 }
 
+// --- Movement constants mirrored from game-server/server.js + physics/collisions.js.
+// Used for client-side prediction of the local player. Keep in sync with the server.
+export const PLAYER_SPEED = 5;
+export const PLAYER_ACCEL = 28;
+export const PLAYER_DECEL = 22;
+export const SPRINT_SPEED_MULTIPLIER = 1.55;
+export const FIELD_WIDTH = 40;
+export const FIELD_HEIGHT = 30;
+
 /** Visual Y offset for player meshes (matches server collision radius). */
 export function getPlayerVisualY(characterType) {
   return getCharacterStats(characterType).radius;

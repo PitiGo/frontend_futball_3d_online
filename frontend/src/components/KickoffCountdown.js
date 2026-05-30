@@ -12,10 +12,14 @@ const KickoffCountdown = ({ kickoffEndsAt, isMobile }) => {
     }
 
     let goTimeout;
+    let goTriggered = false;
 
     const tick = () => {
       const remaining = kickoffEndsAt - Date.now();
       if (remaining <= 0) {
+        if (goTriggered) return; // Avoid re-showing "GO!" on every tick.
+        goTriggered = true;
+        clearInterval(interval); // Stop ticking once kickoff starts.
         setDisplay(t('gameUI.kickoffGo'));
         goTimeout = setTimeout(() => setDisplay(null), 700);
         return;
@@ -23,8 +27,9 @@ const KickoffCountdown = ({ kickoffEndsAt, isMobile }) => {
       setDisplay(String(Math.ceil(remaining / 1000)));
     };
 
-    tick();
+    // Create the interval before the first tick so tick() can clear it.
     const interval = setInterval(tick, 100);
+    tick();
 
     return () => {
       clearInterval(interval);

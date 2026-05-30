@@ -174,6 +174,13 @@ function sanitizeInput(input, maxLength = 200) {
 function vector3ToObject(v) { return v ? { x: v.x, y: v.y, z: v.z } : { x: 0, y: 0, z: 0 }; }
 function quaternionToObject(q) { return q ? { x: q.x, y: q.y, z: q.z, w: q.w } : { x: 0, y: 0, z: 0, w: 1 }; }
 
+// Network payload optimization: 2-decimal precision (cm-level on a 40x30 pitch)
+// shrinks each float's JSON length. Sent 20x/sec per player, this adds up.
+function round2(n) { return Math.round(n * 100) / 100; }
+function vector3ToNetObject(v) {
+  return v ? { x: round2(v.x), y: round2(v.y), z: round2(v.z) } : { x: 0, y: 0, z: 0 };
+}
+
 function getSpawnPosition(team) {
   const side = team === 'left' ? -1 : 1;
   return new Vector3(
@@ -721,7 +728,7 @@ function emitGameState(roomId, state) {
   // Static fields (name, team, characterType) are sent via teamUpdate / playersListUpdate.
   const playersData = Array.from(state.players.values()).map(p => ({
     id: p.id,
-    position: vector3ToObject(p.position),
+    position: vector3ToNetObject(p.position),
     isMoving: state.playerMovements.get(p.id)?.moveDirection.lengthSquared() > 0.01,
     isControllingBall: p.isControllingBall,
     stamina: Math.round((p.stamina / STAMINA_MAX) * 100) / 100, // 0..1 normalizado
@@ -734,13 +741,13 @@ function emitGameState(roomId, state) {
   state.players.forEach(p => {
     if (p.isControllingBall) {
       controllingPlayerId = p.id;
-      controlRemainingMs = Math.max(0, 3000 - (performance.now() - p.ballControlTime));
+      controlRemainingMs = Math.round(Math.max(0, 3000 - (performance.now() - p.ballControlTime)));
     }
   });
 
   const gameStatePayload = {
     players: playersData,
-    ballPosition: vector3ToObject(state.ballPosition),
+    ballPosition: vector3ToNetObject(state.ballPosition),
     score: state.score,
     controllingPlayerId,
     controlRemainingMs,
