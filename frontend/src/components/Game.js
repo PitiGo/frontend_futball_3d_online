@@ -262,6 +262,8 @@ const Game = () => {
         },
         onReadyUpdate: setReadyState,
         onGameStart: () => {
+            setShowingEndMessage(false);
+            setGameOverInfo(null);
             setGameStarted(true);
             setGameInProgress(true);
         },
@@ -369,15 +371,15 @@ const Game = () => {
         socketRef.current?.emit('removeBot', { team });
     }, []);
 
-    const handleBackToLobby = useCallback(() => {
+    // Al terminar una partida, volver a la pantalla de selección conservando
+    // equipo y personaje. El usuario solo pulsa "Listo" de nuevo (o cambia su
+    // selección si quiere). No se fuerza a reelegir.
+    const handleContinue = useCallback(() => {
         setShowingEndMessage(false);
         setGameOverInfo(null);
         setGameStarted(false);
         setGameInProgress(false);
         setScore({ left: 0, right: 0 });
-        setTeamSelected(false);
-        setCurrentTeam(null);
-        setSelectedCharacter(null);
         resetMovement();
     }, [resetMovement]);
 
@@ -1288,7 +1290,7 @@ const Game = () => {
                     gameOverInfo={gameOverInfo}
                     isMobile={isMobile}
                     t={t}
-                    onBackToLobby={handleBackToLobby}
+                    onContinue={handleContinue}
                 />
             )}
         </div>

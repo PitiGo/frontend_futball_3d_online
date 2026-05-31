@@ -1,6 +1,6 @@
 import React from 'react';
 
-const VictoryScreen = ({ gameOverInfo, isMobile, t, onBackToLobby }) => {
+const VictoryScreen = ({ gameOverInfo, isMobile, t, onContinue }) => {
   if (!gameOverInfo) return null;
 
   const isDraw = !gameOverInfo?.winningTeam;
@@ -108,7 +108,7 @@ const VictoryScreen = ({ gameOverInfo, isMobile, t, onBackToLobby }) => {
 
       <button
         type="button"
-        onClick={onBackToLobby}
+        onClick={onContinue}
         style={{
           marginTop: '2rem',
           padding: '0.85rem 2rem',
@@ -117,11 +117,11 @@ const VictoryScreen = ({ gameOverInfo, isMobile, t, onBackToLobby }) => {
           border: 'none',
           borderRadius: '8px',
           cursor: 'pointer',
-          backgroundColor: '#3b82f6',
+          backgroundColor: '#22c55e',
           color: 'white',
         }}
       >
-        {t('gameUI.backToLobby') || 'Back to lobby'}
+        {t('gameUI.continue') || 'Continue'}
       </button>
     </div>
   );

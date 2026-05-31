@@ -1,7 +1,7 @@
 import * as BABYLON from '@babylonjs/core';
 
-export const FIELD_WIDTH = 40;
-export const FIELD_HEIGHT = 30;
+export const FIELD_WIDTH = 52;
+export const FIELD_HEIGHT = 39;
 
 export function createProceduralField(scene) {
   const ground = BABYLON.MeshBuilder.CreateGround('ground', {

@@ -2,9 +2,9 @@
  * Shared physics helpers for authoritative server simulation.
  */
 
-export const FIELD_WIDTH = 40;
-export const FIELD_HEIGHT = 30;
-export const GOAL_DEPTH = 7;
+export const FIELD_WIDTH = 52;
+export const FIELD_HEIGHT = 39;
+export const GOAL_DEPTH = 8;
 export const GOAL_Z_MIN = -GOAL_DEPTH / 2;
 export const GOAL_Z_MAX = GOAL_DEPTH / 2;
 export const GOAL_HEIGHT = 2.44;
@@ -12,11 +12,18 @@ export const GOAL_NET_DEPTH = 2.5;
 export const GOAL_POST_RADIUS = 0.10;
 export const BALL_RADIUS = 0.5;
 
+// Arquetipos espejo para equilibrar equipos:
+//  - Veloces (conejo / lagarto): mucha velocidad, menos control y disparo.
+//  - Potentes (cerdo / tortuga): poca velocidad, mucho control y disparo.
+// Cada equipo tiene exactamente un veloz y un potente con stats idénticas a su
+// contraparte del otro equipo, de modo que ningún equipo tiene ventaja.
 export const CHARACTER_STATS = {
-  player: { speedMultiplier: 1.15, controlRadius: 1.5, shotMultiplier: 1.0, radius: 0.5 },
-  pig: { speedMultiplier: 0.95, controlRadius: 1.6, shotMultiplier: 1.2, radius: 0.55 },
-  lizard: { speedMultiplier: 1.05, controlRadius: 1.4, shotMultiplier: 1.05, radius: 0.48 },
-  turtle: { speedMultiplier: 0.85, controlRadius: 1.7, shotMultiplier: 0.9, radius: 0.58 },
+  // Mamíferos (left)
+  player: { speedMultiplier: 1.35, controlRadius: 1.35, shotMultiplier: 0.85, radius: 0.5 },  // veloz
+  pig: { speedMultiplier: 0.82, controlRadius: 1.85, shotMultiplier: 1.3, radius: 0.58 },      // potente
+  // Reptiles (right)
+  lizard: { speedMultiplier: 1.35, controlRadius: 1.35, shotMultiplier: 0.85, radius: 0.5 },   // veloz (espejo de conejo)
+  turtle: { speedMultiplier: 0.82, controlRadius: 1.85, shotMultiplier: 1.3, radius: 0.58 },    // potente (espejo de cerdo)
 };
 
 export function getCharacterStats(characterType) {
@@ -99,7 +106,7 @@ export function stepPlayerVelocityXZ(
   velocity.y = 0;
 }
 
-/** Goal post centers in world XZ (matches client goalWidth=7, posts at ±3.5 on Z). */
+/** Goal post centers in world XZ (matches client goalWidth=GOAL_DEPTH, posts at ±GOAL_DEPTH/2 on Z). */
 export function getGoalPosts() {
   const goalX = FIELD_WIDTH / 2;
   const postZ = GOAL_DEPTH / 2;

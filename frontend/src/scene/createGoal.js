@@ -33,7 +33,7 @@ export function createGoal(scene, position, isLeftGoal) {
   const goalRoot = new BABYLON.TransformNode('goalRoot', scene);
   goalRoot.position = position;
 
-  const goalWidth = 7;
+  const goalWidth = 8; // Debe coincidir con GOAL_DEPTH del servidor (collisions.js)
   const goalHeight = 2.44;
   const goalDepth = 2.0;
   const postRadius = 0.10;

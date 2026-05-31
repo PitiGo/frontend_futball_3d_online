@@ -108,6 +108,15 @@ class CharacterManager {
                     console.warn(`Animaciones faltantes para ${characterType}:`, missingAnimations);
                 }
 
+                // Evitar el autoplay del primer AnimationGroup del glTF: las animaciones
+                // originales mueven el esqueleto compartido y harían que los clones
+                // aparezcan "corriendo" antes de recibir su primer estado del servidor.
+                // Cada instancia controla su propia copia (idle por defecto).
+                task.loadedAnimationGroups.forEach((group) => {
+                    group.stop();
+                    group.reset();
+                });
+
                 this.loadedCharacters.set(characterType, {
                     mesh: rootMesh,
                     skeleton: skeleton,

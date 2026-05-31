@@ -3,9 +3,9 @@ import { useTranslation } from '../i18n/LanguageContext';
 import { getCharacterStats } from '../constants/characterStats';
 
 const STAT_MAX = {
-  speed: 1.15,
-  control: 1.7,
-  shot: 1.2,
+  speed: 1.35,
+  control: 1.85,
+  shot: 1.3,
 };
 
 const StatBar = ({ label, value, max, color }) => {

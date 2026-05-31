@@ -78,7 +78,7 @@ const io = new Server(httpServer, {
 // --- Constantes del Juego (parametrizables) ---
 const availableSalas = parseEnvList('ROOMS', ['room1', 'room2']);
 const PLAYER_RADIUS = 0.5;
-const PLAYER_SPEED = 5; // Velocidad base (unidades por segundo) - Reference: Player moves at 5 u/s
+const PLAYER_SPEED = 5.5; // Velocidad base (u/s). Subida leve para compensar el campo más grande.
 const BALL_MASS = 0.45;
 const PLAYER_MASS = 75; // Masa real
 const INV_BALL_MASS = 1 / BALL_MASS;
@@ -462,7 +462,8 @@ function resetFullRoomState(roomId, state) {
     player.wantSprint = false;
     player.isSprinting = false;
     player.exhausted = false;
-    // Los bots vuelven a quedar listos automáticamente para una revancha.
+    // Los bots vuelven a quedar listos automáticamente. Los humanos conservan
+    // su equipo y personaje, pero deben volver a pulsar "Listo".
     if (player.isBot && player.team) {
       player.ready = true;
       state.readyState[player.team].add(player.id);

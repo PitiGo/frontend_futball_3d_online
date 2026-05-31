@@ -6,7 +6,7 @@ import * as CANNON from 'cannon-es';
 import CharacterManager from '../services/characterManager';
 import { createScoreDisplay } from './scoreDisplay';
 import { createControlEffect, BALL_CONTROL_RADIUS } from './createControlEffect';
-import { createProceduralField, FIELD_WIDTH } from './createField';
+import { createProceduralField, FIELD_WIDTH, FIELD_HEIGHT } from './createField';
 import { createGoal } from './createGoal';
 
 export function createGameScene(canvas, { refs, isMobileRef, onSceneReady, onLoadComplete }) {
@@ -127,7 +127,7 @@ export function createGameScene(canvas, { refs, isMobileRef, onSceneReady, onLoa
         skyDome.material = skyMaterial;
         
         // === SUELO EXTERIOR (área alrededor del campo) ===
-        const EXTERIOR_SIZE = 80; // Tamaño moderado para ver más cielo
+        const EXTERIOR_SIZE = 100; // Amplio para cubrir el campo agrandado y ver cielo
         const exteriorGround = BABYLON.MeshBuilder.CreateGround('exteriorGround', {
             width: EXTERIOR_SIZE,
             height: EXTERIOR_SIZE,
@@ -182,8 +182,8 @@ export function createGameScene(canvas, { refs, isMobileRef, onSceneReady, onLoa
         // === DECORACIONES DEL ESTADIO ===
         
         // Dimensiones del campo para posicionar elementos
-        const fieldW = 40;
-        const fieldH = 30;
+        const fieldW = FIELD_WIDTH;
+        const fieldH = FIELD_HEIGHT;
         
         // Materiales compartidos para optimización
         const grayMat = new BABYLON.StandardMaterial("grayMat", scene);
