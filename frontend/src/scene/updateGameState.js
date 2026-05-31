@@ -53,6 +53,7 @@ export function createUpdateGameState(refs) {
 
     const {
       players,
+      roster,
       ballPosition,
       score,
       connectedPlayers,
@@ -158,8 +159,14 @@ export function createUpdateGameState(refs) {
         }
       });
 
+      // With delta compression, `players` only carries changed entries. Use the
+      // authoritative `roster` (all current ids) to decide removals; fall back to
+      // `players` if roster is absent (older server).
+      const activeIds = Array.isArray(roster)
+        ? roster
+        : players.map((p) => p.id);
       Object.keys(playersRef.current).forEach((id) => {
-        if (!players.find((player) => player.id === id)) {
+        if (!activeIds.includes(id)) {
           try {
             characterManagerRef.current.removePlayer(id);
             delete playersRef.current[id];
@@ -252,6 +259,8 @@ export function createUpdateGameState(refs) {
       const self = selfId && Array.isArray(players)
         ? players.find((p) => p.id === selfId)
         : null;
+      // With delta compression `self` may be absent on ticks where nothing changed;
+      // in that case we keep the last rendered value instead of hiding the bar.
       if (self && typeof self.stamina === 'number') {
         const fraction = Math.max(0, Math.min(1, self.stamina));
         staminaContainerRef.current.style.display = 'block';
@@ -260,8 +269,6 @@ export function createUpdateGameState(refs) {
         staminaFillRef.current.style.boxShadow = self.isSprinting
           ? '0 0 10px rgba(56, 189, 248, 0.8)'
           : 'none';
-      } else {
-        staminaContainerRef.current.style.display = 'none';
       }
     }
 

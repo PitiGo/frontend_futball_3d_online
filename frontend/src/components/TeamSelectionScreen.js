@@ -47,6 +47,8 @@ const TeamSelectionScreen = ({
   teams,
   readyState,
   onToggleReady,
+  onAddBot,
+  onRemoveBot,
   currentTeam,
   playerName,
   gameInProgress,
@@ -146,6 +148,52 @@ const TeamSelectionScreen = ({
 
   const getTeamName = (team) => team === 'left' ? t('teamSelection.mammals') : t('teamSelection.reptiles');
   const getTeamColor = (team) => team === 'left' ? '#3b82f6' : '#ef4444';
+
+  const renderBotControls = (team) => {
+    if (!onAddBot) return null;
+    const full = (teams?.[team]?.length || 0) >= maxPlayersPerTeam;
+    const hasBots = (teams?.[team] || []).some((p) => typeof p.id === 'string' && p.id.startsWith('bot-'));
+    return (
+      <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.5rem' }}>
+        <button
+          type="button"
+          onClick={() => onAddBot(team)}
+          disabled={full}
+          style={{
+            flex: 1,
+            padding: '0.4rem',
+            backgroundColor: full ? '#cbd5e1' : '#0f766e',
+            color: 'white',
+            border: 'none',
+            borderRadius: '6px',
+            cursor: full ? 'not-allowed' : 'pointer',
+            fontSize: '0.8rem',
+            fontWeight: 600,
+          }}
+        >
+          {`+ ${t('teamSelection.addBot')}`}
+        </button>
+        {hasBots && onRemoveBot && (
+          <button
+            type="button"
+            onClick={() => onRemoveBot(team)}
+            style={{
+              padding: '0.4rem 0.7rem',
+              backgroundColor: '#64748b',
+              color: 'white',
+              border: 'none',
+              borderRadius: '6px',
+              cursor: 'pointer',
+              fontSize: '0.8rem',
+              fontWeight: 600,
+            }}
+          >
+            {`− ${t('teamSelection.removeBot')}`}
+          </button>
+        )}
+      </div>
+    );
+  };
 
   return (
     <div style={{
@@ -298,6 +346,7 @@ const TeamSelectionScreen = ({
                   </div>
                 )}
               </div>
+              {renderBotControls('left')}
               {currentTeam !== 'left' && !getReadyStatus(currentTeam, playerId) && (
                 <button
                   onClick={() => onTeamSelect('left')}
@@ -400,6 +449,7 @@ const TeamSelectionScreen = ({
                   </div>
                 )}
               </div>
+              {renderBotControls('right')}
               {currentTeam !== 'right' && !getReadyStatus(currentTeam, playerId) && (
                 <button
                   onClick={() => onTeamSelect('right')}

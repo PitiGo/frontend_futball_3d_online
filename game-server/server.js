@@ -112,6 +112,11 @@ const TEAM_CHARACTERS = {
   right: ['turtle', 'lizard']
 };
 
+// --- Bots / IA simple ---
+const BOT_KICK_RANGE = 1.4;        // Distancia para golpear el balón
+const BOT_KICK_COOLDOWN_MS = 550;  // Evita golpes en cada tick
+const BOT_DEFEND_BIAS = 0.35;      // Cuánto retrocede un bot lejano hacia su campo
+
 const gameStates = {
   WAITING: 'waiting',
   PLAYING: 'playing',
@@ -123,6 +128,7 @@ const gameStates = {
 const salaStates = {};
 availableSalas.forEach(roomId => {
   salaStates[roomId] = {
+    roomId, // Identificador de la sala (para ids de bots, logs, etc.)
     players: new Map(), // Mapa de socket.id -> playerData
     teams: { // Almacena solo IDs para referencia rápida
       left: new Set(),
@@ -150,6 +156,9 @@ availableSalas.forEach(roomId => {
     lastBounceEmit: 0, // Throttle para el evento de sonido de rebote
     lastShooter: null, // { id, team } del último jugador que impulsó el balón (atribución de goles)
     scorers: new Map(), // id -> { name, team, goals } acumulado del partido (sobrevive a desconexiones)
+    botCounter: 0, // Contador para nombrar/identificar bots
+    lastSent: new Map(), // id -> snapshot enviado (delta compression)
+    emitCount: 0, // Contador de emisiones para keyframes periódicos
   };
 });
 
@@ -444,12 +453,18 @@ function resetFullRoomState(roomId, state) {
 
   // Reposicionar jugadores y resetear estado 'listo'
   state.players.forEach(player => {
-    player.ready = false;
     player.isControllingBall = false;
     player.stamina = STAMINA_MAX;
     player.wantSprint = false;
     player.isSprinting = false;
     player.exhausted = false;
+    // Los bots vuelven a quedar listos automáticamente para una revancha.
+    if (player.isBot && player.team) {
+      player.ready = true;
+      state.readyState[player.team].add(player.id);
+    } else {
+      player.ready = false;
+    }
     if (player.team) {
       player.position = getSpawnPosition(player.team);
     } else {
@@ -566,6 +581,120 @@ function checkPlayerOutOfBounds(state, roomId) {
   });
 }
 
+// --- Bots / IA ---
+function countHumans(state) {
+  let n = 0;
+  state.players.forEach((p) => { if (!p.isBot) n += 1; });
+  return n;
+}
+
+function createBot(state, team) {
+  if (team !== 'left' && team !== 'right') return null;
+  if (state.teams[team].size >= MAX_PLAYERS_PER_TEAM) return null;
+  state.botCounter += 1;
+  const id = `bot-${state.roomId || 'r'}-${state.botCounter}`;
+  const chars = TEAM_CHARACTERS[team];
+  const characterType = chars[Math.floor(Math.random() * chars.length)];
+  const bot = {
+    id,
+    name: `Bot ${state.botCounter}`,
+    team,
+    characterType,
+    position: getSpawnPosition(team),
+    rotation: new Quaternion(0, 0, 0, 1),
+    velocity: new Vector3(0, 0, 0),
+    ready: true, // Los bots siempre están listos
+    isBot: true,
+    isControllingBall: false,
+    ballControlTime: 0,
+    lastKickTime: 0,
+    stamina: STAMINA_MAX,
+    wantSprint: false,
+    isSprinting: false,
+    exhausted: false,
+    goals: 0,
+  };
+  state.players.set(id, bot);
+  state.playerMovements.set(id, { moveDirection: Vector3.Zero() });
+  state.teams[team].add(id);
+  state.readyState[team].add(id);
+  return bot;
+}
+
+function removeBotFromTeam(state, team) {
+  // Elimina el último bot añadido a ese equipo.
+  const botIds = Array.from(state.teams[team]).filter((id) => state.players.get(id)?.isBot);
+  if (botIds.length === 0) return false;
+  const id = botIds[botIds.length - 1];
+  state.players.delete(id);
+  state.playerMovements.delete(id);
+  state.teams[team].delete(id);
+  state.readyState[team].delete(id);
+  return true;
+}
+
+function removeAllBots(state) {
+  ['left', 'right'].forEach((team) => {
+    Array.from(state.teams[team]).forEach((id) => {
+      if (state.players.get(id)?.isBot) {
+        state.players.delete(id);
+        state.playerMovements.delete(id);
+        state.teams[team].delete(id);
+        state.readyState[team].delete(id);
+      }
+    });
+  });
+}
+
+// IA por tick: los bots persiguen el balón y lo golpean hacia la portería rival.
+function updateBotAI(state) {
+  let controlledByHuman = false;
+  state.players.forEach((p) => { if (p.isControllingBall && !p.isBot) controlledByHuman = true; });
+
+  const ball = state.ballPosition;
+  const now = performance.now();
+  state.players.forEach((bot) => {
+    if (!bot.isBot || !bot.team) return;
+    const move = state.playerMovements.get(bot.id);
+    if (!move) return;
+
+    const toBallX = ball.x - bot.position.x;
+    const toBallZ = ball.z - bot.position.z;
+    const dist = Math.hypot(toBallX, toBallZ);
+
+    // Dirección base: perseguir el balón.
+    if (dist > 0.001) {
+      move.moveDirection.copyFromFloats(toBallX / dist, 0, toBallZ / dist);
+    } else {
+      move.moveDirection.set(0, 0, 0);
+    }
+
+    // Si el balón está lejos en su propio campo, frena un poco (postura defensiva).
+    const ownHalfSign = bot.team === 'left' ? -1 : 1;
+    const ballInOwnHalf = Math.sign(ball.x) === ownHalfSign;
+    if (dist > 6 && !ballInOwnHalf) {
+      move.moveDirection.scaleInPlace(1 - BOT_DEFEND_BIAS);
+    }
+
+    // Golpear el balón hacia la portería rival cuando está cerca.
+    if (dist < BOT_KICK_RANGE && !controlledByHuman && (now - (bot.lastKickTime || 0)) > BOT_KICK_COOLDOWN_MS) {
+      const goalX = bot.team === 'left' ? FIELD_WIDTH / 2 : -FIELD_WIDTH / 2;
+      const aimX = goalX - ball.x;
+      const aimZ = -ball.z * 0.6; // sesga hacia el centro de la portería
+      const aimLen = Math.hypot(aimX, aimZ) || 1;
+      const aim = new Vector3(aimX / aimLen, 0, aimZ / aimLen);
+      const stats = getCharacterStats(bot.characterType);
+      const speed = (BALL_RELEASE_MIN + 4) * (stats.shotMultiplier || 1);
+      state.ballVelocity = aim.scale(speed);
+      state.ballLastShotTime = now;
+      state.lastShooter = { id: bot.id, team: bot.team };
+      bot.lastKickTime = now;
+      const sep = (stats.radius || PLAYER_RADIUS) + BALL_RADIUS + 0.5;
+      state.ballPosition.addInPlace(aim.scale(sep));
+    }
+  });
+}
+
 // --- Bucle Principal de Física y Lógica ---
 function updateGamePhysics(roomId, state) {
   const now = performance.now();
@@ -587,6 +716,8 @@ function updateGamePhysics(roomId, state) {
       endMatchByTime(roomId, state);
       return;
     }
+    // IA de bots: decide movimiento/golpeo antes de integrar la física.
+    updateBotAI(state);
   }
 
   // 1. Actualizar Jugadores
@@ -842,18 +973,55 @@ function maybeEmitBounce(roomId, state) {
   io.to(roomId).volatile.emit('ballBounce', { strength });
 }
 
-// --- Emisión de Estado ---
+// --- Emisión de Estado (con delta compression) ---
+// Solo enviamos los jugadores cuya posición o flags cambiaron desde el último
+// envío. El cliente conserva la última posición de los ausentes (lerp). Para que
+// el cliente sepa qué jugadores siguen en la sala, enviamos `roster` con todos
+// los ids (barato) y solo elimina los que ya no estén ahí.
+const POS_EPSILON = 0.02;
+function playerChanged(prev, x, z, isMoving, isControllingBall, stamina, isSprinting) {
+  if (!prev) return true;
+  if (prev.isMoving !== isMoving || prev.isControllingBall !== isControllingBall || prev.isSprinting !== isSprinting) return true;
+  if (Math.abs(prev.stamina - stamina) >= 0.02) return true;
+  if (Math.abs(prev.x - x) >= POS_EPSILON || Math.abs(prev.z - z) >= POS_EPSILON) return true;
+  return false;
+}
+
+// Cada ~2s (40 emisiones a 20Hz) enviamos un keyframe completo para que clientes
+// recién conectados y posibles desincronizaciones se autocorrijan.
+const FULL_KEYFRAME_EVERY = 40;
 function emitGameState(roomId, state) {
-  // Crear payload solo con datos necesarios para el cliente
   // Static fields (name, team, characterType) are sent via teamUpdate / playersListUpdate.
-  const playersData = Array.from(state.players.values()).map(p => ({
-    id: p.id,
-    position: vector3ToNetObject(p.position),
-    isMoving: state.playerMovements.get(p.id)?.moveDirection.lengthSquared() > 0.01,
-    isControllingBall: p.isControllingBall,
-    stamina: Math.round((p.stamina / STAMINA_MAX) * 100) / 100, // 0..1 normalizado
-    isSprinting: p.isSprinting,
-  }));
+  state.emitCount = (state.emitCount || 0) + 1;
+  const forceFull = state.emitCount % FULL_KEYFRAME_EVERY === 0;
+  const playersData = [];
+  const roster = [];
+  state.players.forEach((p) => {
+    roster.push(p.id);
+    const x = round2(p.position.x);
+    const z = round2(p.position.z);
+    const isMoving = state.playerMovements.get(p.id)?.moveDirection.lengthSquared() > 0.01;
+    const isControllingBall = p.isControllingBall;
+    const stamina = Math.round((p.stamina / STAMINA_MAX) * 100) / 100; // 0..1 normalizado
+    const isSprinting = p.isSprinting;
+
+    const prev = state.lastSent.get(p.id);
+    if (forceFull || playerChanged(prev, x, z, isMoving, isControllingBall, stamina, isSprinting)) {
+      playersData.push({
+        id: p.id,
+        position: vector3ToNetObject(p.position),
+        isMoving,
+        isControllingBall,
+        stamina,
+        isSprinting,
+      });
+      state.lastSent.set(p.id, { x, z, isMoving, isControllingBall, stamina, isSprinting });
+    }
+  });
+  // Purgar del cache jugadores que ya no existen.
+  if (state.lastSent.size > state.players.size) {
+    state.lastSent.forEach((_, id) => { if (!state.players.has(id)) state.lastSent.delete(id); });
+  }
 
   // Calcular jugador que controla, tiempo restante y carga del disparo (0..1)
   let controllingPlayerId = null;
@@ -870,6 +1038,7 @@ function emitGameState(roomId, state) {
 
   const gameStatePayload = {
     players: playersData,
+    roster,
     ballPosition: vector3ToNetObject(state.ballPosition),
     score: state.score,
     matchTimeLeftMs: Math.round(state.matchTimeLeftMs),
@@ -982,7 +1151,8 @@ io.on('connection', (socket) => {
     io.to(roomId).emit('playersListUpdate', Array.from(state.players.values()).map(p => ({
       id: p.id, name: p.name, team: p.team, characterType: p.characterType
     })));
-    // Enviar estado de juego actual a todos para sincronizar nuevas posiciones/estado
+    // Forzar envío completo (keyframe) para que el nuevo cliente reciba todo.
+    state.lastSent.clear();
     emitGameState(roomId, state);
 
   });
@@ -1094,6 +1264,46 @@ io.on('connection', (socket) => {
     if (state.currentGameState === gameStates.WAITING) {
       checkStartGame(currentRoomId, state);
     }
+  });
+
+  // Handler 'addBot' — añade un bot a un equipo (solo en lobby / fin de partida)
+  socket.on('addBot', ({ team } = {}) => {
+    if (!currentRoomId) return;
+    const state = salaStates[currentRoomId];
+    if (!state) return;
+    if (state.currentGameState !== gameStates.WAITING && state.currentGameState !== gameStates.GAME_OVER) {
+      return socket.emit('readyError', { message: 'Solo puedes añadir bots antes de empezar.' });
+    }
+    const bot = createBot(state, team);
+    if (!bot) return socket.emit('selectTeamError', { message: 'Ese equipo está lleno.' });
+    log(`[${currentRoomId}] Bot añadido (${bot.name}) al equipo ${team}.`);
+
+    io.to(currentRoomId).emit('teamUpdate', getTeamStatus(state).teams);
+    io.to(currentRoomId).emit('readyUpdate', getReadyPayload(state));
+    io.to(currentRoomId).emit('playersListUpdate', Array.from(state.players.values()).map(p => ({
+      id: p.id, name: p.name, team: p.team, characterType: p.characterType,
+    })));
+    emitGameState(currentRoomId, state);
+
+    if (state.currentGameState === gameStates.WAITING) {
+      checkStartGame(currentRoomId, state);
+    }
+  });
+
+  // Handler 'removeBot' — quita un bot de un equipo
+  socket.on('removeBot', ({ team } = {}) => {
+    if (!currentRoomId) return;
+    const state = salaStates[currentRoomId];
+    if (!state) return;
+    if (state.currentGameState !== gameStates.WAITING && state.currentGameState !== gameStates.GAME_OVER) return;
+    if (!removeBotFromTeam(state, team)) return;
+    log(`[${currentRoomId}] Bot eliminado del equipo ${team}.`);
+    io.to(currentRoomId).emit('teamUpdate', getTeamStatus(state).teams);
+    io.to(currentRoomId).emit('readyUpdate', getReadyPayload(state));
+    io.to(currentRoomId).emit('playersListUpdate', Array.from(state.players.values()).map(p => ({
+      id: p.id, name: p.name, team: p.team, characterType: p.characterType,
+    })));
+    emitGameState(currentRoomId, state);
   });
 
   // --- Manejo de Movimiento ---
@@ -1271,6 +1481,12 @@ io.on('connection', (socket) => {
       // Quitar del mapa principal de jugadores y movimientos
       state.players.delete(socket.id);
       state.playerMovements.delete(socket.id);
+
+      // Si ya no quedan humanos, retirar los bots (no dejamos partidas solo-bots).
+      if (countHumans(state) === 0) {
+        removeAllBots(state);
+        log(`[${currentRoomId}] Sin humanos: bots retirados.`);
+      }
 
       // Notificar a los demás en la sala
       const status = getTeamStatus(state);

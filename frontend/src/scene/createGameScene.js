@@ -442,8 +442,12 @@ export function createGameScene(canvas, { refs, isMobileRef, onSceneReady, onLoa
         const trailMat = new BABYLON.StandardMaterial("trailMat", scene);
         trailMat.emissiveColor = new BABYLON.Color3(1, 1, 1); // Blanco brillante
         trailMat.diffuseColor = new BABYLON.Color3(1, 1, 1);
-        trailMat.alpha = 0.4; // Semitransparente
+        trailMat.alpha = 0; // Oculta en reposo; se intensifica con la velocidad
+        trailMat.disableLighting = true;
         trail.material = trailMat;
+        // Estela dinámica: estimamos la velocidad del balón por frame y mapeamos
+        // a opacidad/color (azul→naranja) para que solo destaque en disparos rápidos.
+        let trailPrevPos = ball.position.clone();
 
         // --- FIN MEJORA BALÓN ---
 
@@ -487,7 +491,22 @@ export function createGameScene(canvas, { refs, isMobileRef, onSceneReady, onLoa
 
                 const trailMesh = scene.getMeshByName("ballTrail");
                 if (trailMesh) {
-                    trailMesh.isVisible = true;
+                    const ballMesh = refs.ballRef.current;
+                    const dt = Math.max(1, scene.getEngine().getDeltaTime()); // ms
+                    const dx = ballMesh.position.x - trailPrevPos.x;
+                    const dz = ballMesh.position.z - trailPrevPos.z;
+                    const speed = Math.hypot(dx, dz) / (dt / 1000); // u/s
+                    trailPrevPos.copyFrom(ballMesh.position);
+                    // Mapear velocidad a opacidad: ~invisible bajo 6 u/s, máx sobre 30 u/s.
+                    const intensity = Math.max(0, Math.min(1, (speed - 6) / 24));
+                    trailMat.alpha = intensity * 0.6;
+                    trailMesh.isVisible = intensity > 0.02;
+                    // Color azul (lento) → naranja (rápido) para dar sensación de potencia.
+                    trailMat.emissiveColor.set(
+                        0.6 + intensity * 0.4,
+                        0.7,
+                        1 - intensity * 0.7,
+                    );
                 }
             }
         });

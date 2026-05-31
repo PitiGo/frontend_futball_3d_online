@@ -361,6 +361,14 @@ const Game = () => {
         setMuted(toggleMuted());
     }, []);
 
+    const handleAddBot = useCallback((team) => {
+        socketRef.current?.emit('addBot', { team });
+    }, []);
+
+    const handleRemoveBot = useCallback((team) => {
+        socketRef.current?.emit('removeBot', { team });
+    }, []);
+
     const handleBackToLobby = useCallback(() => {
         setShowingEndMessage(false);
         setGameOverInfo(null);
@@ -530,6 +538,8 @@ const Game = () => {
                         teams={teams}
                         readyState={readyState}
                         onToggleReady={handleToggleReady}
+                        onAddBot={handleAddBot}
+                        onRemoveBot={handleRemoveBot}
                         currentTeam={currentTeam}
                         playerName={playerName}
                         gameInProgress={gameInProgress}
