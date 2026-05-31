@@ -78,6 +78,16 @@ export function createUpdateGameState(refs) {
       players.forEach(async (playerData) => {
         if (!playerData?.id || !playerData?.position) return;
 
+        // Persist static fields (sent on first send / keyframes) into meta so the
+        // mesh is created with the correct character/team even if teamUpdate is late.
+        if (playerData.characterType || playerData.team) {
+          playerMetaRef.current[playerData.id] = {
+            ...playerMetaRef.current[playerData.id],
+            ...(playerData.characterType ? { characterType: playerData.characterType } : {}),
+            ...(playerData.team ? { team: playerData.team } : {}),
+          };
+        }
+
         if (!playersRef.current[playerData.id]) {
           try {
             const meta = playerMetaRef.current[playerData.id] || {};

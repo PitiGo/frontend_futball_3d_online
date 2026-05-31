@@ -88,9 +88,9 @@ const RESTITUTION = 0.6; // Coeficiente de restitución (elasticidad)
 const MAX_PLAYERS_PER_TEAM = 3;
 const GOALS_TO_WIN = 3;
 const BALL_CONTROL_RADIUS = 1.5;
-const BALL_RELEASE_MIN = 18; // Minimum shot speed (quick tap)
-const BALL_RELEASE_MAX = 36; // Maximum shot speed (full charge)
-const MAX_BALL_SPEED = 42; // Cap above release max; keeps shots readable
+const BALL_RELEASE_MIN = 14; // Minimum shot speed (quick tap)
+const BALL_RELEASE_MAX = 28; // Maximum shot speed (full charge) — reducido para que un disparo no cruce todo el campo
+const MAX_BALL_SPEED = 32; // Cap above release max; keeps shots readable
 const PHYSICS_TICK_RATE = 60; // Hz
 const STATE_EMIT_RATE = 20; // Hz — physics at 60, network at 20
 const EMIT_EVERY_N_TICKS = PHYSICS_TICK_RATE / STATE_EMIT_RATE;
@@ -113,9 +113,13 @@ const TEAM_CHARACTERS = {
 };
 
 // --- Bots / IA simple ---
-const BOT_KICK_RANGE = 1.4;        // Distancia para golpear el balón
-const BOT_KICK_COOLDOWN_MS = 550;  // Evita golpes en cada tick
-const BOT_DEFEND_BIAS = 0.35;      // Cuánto retrocede un bot lejano hacia su campo
+const BOT_TOUCH_RANGE = 1.4;        // Distancia para tocar/golpear el balón
+const BOT_TOUCH_COOLDOWN_MS = 320;  // Separación mínima entre toques (regate fluido)
+const BOT_SHOT_COOLDOWN_MS = 900;   // Separación mínima entre disparos potentes
+const BOT_DEFEND_BIAS = 0.35;       // Cuánto retrocede un bot lejano hacia su campo
+const BOT_SHOOT_DISTANCE = 14;      // Solo dispara a puerta si está a <= esta distancia del arco rival
+const BOT_DRIBBLE_SPEED = 9;        // Toque corto de conducción (con fricción → el balón se queda cerca)
+const BOT_SHOT_SPEED = 26;          // Disparo a puerta (sin fricción durante la ventana de disparo)
 
 const gameStates = {
   WAITING: 'waiting',
@@ -144,7 +148,7 @@ availableSalas.forEach(roomId => {
     ballVelocity: new Vector3(0, 0, 0),
     lastUpdateTime: performance.now(),
     ballLastShotTime: 0,           // Timestamp del último disparo
-    ballFrictionCooldownMs: 800,   // Ventana sin fricción tras disparo - El balón ignorará fricción durante casi 1 segundo
+    ballFrictionCooldownMs: 320,   // Ventana sin fricción tras disparo: lo justo para que salga limpio del pie sin que cruce todo el campo
     goalScoredTimeout: null, // ID del temporizador para reiniciar tras gol
     gameOverTimeout: null,   // ID del temporizador para reiniciar tras game over
     gameOverData: null,     // Datos del resultado final
@@ -646,7 +650,9 @@ function removeAllBots(state) {
   });
 }
 
-// IA por tick: los bots persiguen el balón y lo golpean hacia la portería rival.
+// IA por tick: los bots conducen el balón hacia la portería rival con toques
+// cortos y solo disparan (con imprecisión) cuando están cerca del arco. Así el
+// balón no cruza el campo de una sola patada y los goles son más evitables.
 function updateBotAI(state) {
   let controlledByHuman = false;
   state.players.forEach((p) => { if (p.isControllingBall && !p.isBot) controlledByHuman = true; });
@@ -676,22 +682,37 @@ function updateBotAI(state) {
       move.moveDirection.scaleInPlace(1 - BOT_DEFEND_BIAS);
     }
 
-    // Golpear el balón hacia la portería rival cuando está cerca.
-    if (dist < BOT_KICK_RANGE && !controlledByHuman && (now - (bot.lastKickTime || 0)) > BOT_KICK_COOLDOWN_MS) {
-      const goalX = bot.team === 'left' ? FIELD_WIDTH / 2 : -FIELD_WIDTH / 2;
-      const aimX = goalX - ball.x;
-      const aimZ = -ball.z * 0.6; // sesga hacia el centro de la portería
-      const aimLen = Math.hypot(aimX, aimZ) || 1;
-      const aim = new Vector3(aimX / aimLen, 0, aimZ / aimLen);
-      const stats = getCharacterStats(bot.characterType);
-      const speed = (BALL_RELEASE_MIN + 4) * (stats.shotMultiplier || 1);
+    // Tocar el balón solo si está al alcance y no lo controla un humano.
+    if (dist >= BOT_TOUCH_RANGE || controlledByHuman) return;
+
+    const goalX = bot.team === 'left' ? FIELD_WIDTH / 2 : -FIELD_WIDTH / 2;
+    const distToGoal = Math.hypot(goalX - ball.x, ball.z);
+    const stats = getCharacterStats(bot.characterType);
+    const isShot = distToGoal <= BOT_SHOOT_DISTANCE;
+    const cooldown = isShot ? BOT_SHOT_COOLDOWN_MS : BOT_TOUCH_COOLDOWN_MS;
+    if ((now - (bot.lastKickTime || 0)) < cooldown) return;
+
+    // Apuntar al centro del arco rival (preciso, sin imprecisión deliberada).
+    const aimX = goalX - ball.x;
+    const aimZ = (0 - ball.z);
+    const aimLen = Math.hypot(aimX, aimZ) || 1;
+    const aim = new Vector3(aimX / aimLen, 0, aimZ / aimLen);
+
+    if (isShot) {
+      // Disparo a puerta: rápido y con ventana sin fricción para que llegue.
+      const speed = BOT_SHOT_SPEED * (stats.shotMultiplier || 1);
       state.ballVelocity = aim.scale(speed);
-      state.ballLastShotTime = now;
-      state.lastShooter = { id: bot.id, team: bot.team };
-      bot.lastKickTime = now;
-      const sep = (stats.radius || PLAYER_RADIUS) + BALL_RADIUS + 0.5;
-      state.ballPosition.addInPlace(aim.scale(sep));
+      state.ballLastShotTime = now; // activa la ventana sin fricción
+    } else {
+      // Conducción: toque corto. NO marca ballLastShotTime, así la fricción frena
+      // el balón y se queda cerca para el siguiente toque (no cruza el campo).
+      const speed = BOT_DRIBBLE_SPEED * (0.85 + Math.random() * 0.3);
+      state.ballVelocity = aim.scale(speed);
     }
+    state.lastShooter = { id: bot.id, team: bot.team };
+    bot.lastKickTime = now;
+    const sep = (stats.radius || PLAYER_RADIUS) + BALL_RADIUS + 0.5;
+    state.ballPosition.addInPlace(aim.scale(sep));
   });
 }
 
@@ -1006,15 +1027,24 @@ function emitGameState(roomId, state) {
     const isSprinting = p.isSprinting;
 
     const prev = state.lastSent.get(p.id);
-    if (forceFull || playerChanged(prev, x, z, isMoving, isControllingBall, stamina, isSprinting)) {
-      playersData.push({
+    const isNew = !prev;
+    if (forceFull || isNew || playerChanged(prev, x, z, isMoving, isControllingBall, stamina, isSprinting)) {
+      const entry = {
         id: p.id,
         position: vector3ToNetObject(p.position),
         isMoving,
         isControllingBall,
         stamina,
         isSprinting,
-      });
+      };
+      // Adjuntar datos estáticos en el primer envío y en cada keyframe, para que
+      // el cliente nunca renderice un personaje/equipo equivocado por una carrera
+      // de sincronización con los metadatos.
+      if (isNew || forceFull) {
+        entry.characterType = p.characterType;
+        entry.team = p.team;
+      }
+      playersData.push(entry);
       state.lastSent.set(p.id, { x, z, isMoving, isControllingBall, stamina, isSprinting });
     }
   });
