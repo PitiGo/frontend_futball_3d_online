@@ -155,10 +155,13 @@ export function createUpdateGameState(refs) {
           const deltaZ = targetPosition.z - currentPosition.z;
           if (Math.abs(deltaX) > 0.01 || Math.abs(deltaZ) > 0.01) {
             const angle = Math.atan2(deltaX, deltaZ);
-            playerInstance.rotation.y = BABYLON.Scalar.Lerp(
+            // LerpAngle interpola por el camino angular más corto (maneja el wrap
+            // en ±π), evitando que el cuerpo gire por el lado largo al cambiar de
+            // sentido. Factor más alto = giro más ágil y menos "arrastre".
+            playerInstance.rotation.y = BABYLON.Scalar.LerpAngle(
               playerInstance.rotation.y,
               angle,
-              0.1,
+              0.35,
             );
           }
 
