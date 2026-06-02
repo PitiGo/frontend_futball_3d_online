@@ -4,6 +4,9 @@ import { getPlayerVisualY } from '../constants/characterStats';
 import { playKick } from '../services/sound';
 
 const SNAP_DISTANCE = 3;
+// Kick separation + first network tick can jump ~3.2 units; keep above that so
+// the ball lerps instead of snapping on shot.
+const BALL_SNAP_DISTANCE = 6;
 const LERP_ALPHA = 0.15;
 
 // Stamina bar colors by remaining fraction.
@@ -13,9 +16,9 @@ function staminaColor(fraction) {
   return 'linear-gradient(90deg, #ef4444, #fca5a5)';
 }
 
-function lerpToward(current, target) {
+function lerpToward(current, target, snapDistance = SNAP_DISTANCE) {
   const dist = BABYLON.Vector3.Distance(current, target);
-  const alpha = dist > SNAP_DISTANCE ? 1.0 : LERP_ALPHA;
+  const alpha = dist > snapDistance ? 1.0 : LERP_ALPHA;
   return BABYLON.Vector3.Lerp(current, target, alpha);
 }
 
@@ -223,7 +226,7 @@ export function createUpdateGameState(refs) {
       if (speed > 0.01) {
         ballRef.current.rotate(rotationAxis, speed * 8, BABYLON.Space.WORLD);
       }
-      ballRef.current.position = lerpToward(currentPosition, targetPosition);
+      ballRef.current.position = lerpToward(currentPosition, targetPosition, BALL_SNAP_DISTANCE);
     }
 
     if (scoreTextRef.current && score) {
