@@ -25,25 +25,9 @@ export function createGameScene(canvas, { refs, isMobileRef, onSceneReady, onLoa
         // Inicializar CharacterManager
         refs.characterManagerRef.current = new CharacterManager(scene);
 
-        // Cargar los tres modelos
-        const loadCharacters = async () => {
-            try {
-                await Promise.all([
-                    refs.characterManagerRef.current.loadCharacter('player'),
-                    refs.characterManagerRef.current.loadCharacter('pig'),
-                    refs.characterManagerRef.current.loadCharacter('lizard'),
-                    refs.characterManagerRef.current.loadCharacter('turtle')
-                ]);
-                console.log('Todos los modelos cargados exitosamente');
-                onSceneReady();
-                onLoadComplete();
-            } catch (error) {
-                console.error('Error cargando modelos:', error);
-                onLoadComplete();
-            }
-        };
-
-        loadCharacters();
+        // Los personajes se cargan bajo demanda al unirse cada jugador (createPlayerInstance).
+        onSceneReady();
+        onLoadComplete();
 
         // Configuración de la física
         const gravityVector = new BABYLON.Vector3(0, -9.81, 0);
