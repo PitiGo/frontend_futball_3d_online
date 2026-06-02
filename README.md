@@ -150,6 +150,10 @@ Contributions are welcome! Please follow these steps:
 
 This project is licensed under the MIT License - see the LICENSE.md file for details.
 
+## Credits
+
+- Soccer Ball 3D Model by Maggatron (Licensed under CC Attribution)
+
 ## Support
 
 For support, please open an issue in the GitHub repository.

@@ -1,4 +1,5 @@
 import * as BABYLON from '@babylonjs/core';
+import '@babylonjs/loaders/glTF';
 import '@babylonjs/core/Physics/physicsEngineComponent';
 import '@babylonjs/core/Physics/Plugins/cannonJSPlugin';
 import * as GUI from '@babylonjs/gui';
@@ -397,47 +398,19 @@ export function createGameScene(canvas, { refs, isMobileRef, onSceneReady, onLoa
         // Definir las dimensiones del campo como constantes al inicio
         createProceduralField(scene);
 
-        // --- INICIO MEJORA BALÓN ---
+        // --- BALÓN: lógica (invisible) + modelo visual (.glb) ---
 
-        // 1. Geometría de alta definición
-        // Aumentamos 'segments' a 32 para que se vea perfectamente redonda
-        const ball = BABYLON.MeshBuilder.CreateSphere('ball', { 
-            diameter: 1, 
-            segments: 32 
+        // Esfera invisible: hitbox, estela, cámara y posición de red.
+        const ball = BABYLON.MeshBuilder.CreateSphere('ball', {
+            diameter: 1,
+            segments: 8,
         }, scene);
-
-        // 2. Material PBR (Physically Based Rendering) para realismo
-        const ballMaterial = new BABYLON.PBRMaterial('ballMat', scene);
-        
-        // Textura base (Tu imagen actual)
-        ballMaterial.albedoTexture = new BABYLON.Texture("soccerball.png", scene);
-        
-        // Propiedades del material (Cuero sintético)
-        ballMaterial.metallic = 0;      // No es metálico
-        ballMaterial.roughness = 0.4;   // Un poco brillante pero no espejo
-        
-        // Ajustes de iluminación
-        ballMaterial.environmentIntensity = 1.0; // Qué tanto refleja el entorno
-        ballMaterial.usePhysicalLightFalloff = false;
-        
-        // Opcional: Si tienes una textura de normales ("bump map") añade esto:
-        // ballMaterial.bumpTexture = new BABYLON.Texture("soccerball_normal.png", scene);
-        // ballMaterial.bumpTexture.level = 0.5; // Intensidad del relieve
-
-        ball.material = ballMaterial;
-        
-        // Posición inicial y corrección de pivote
         ball.position.y = 0.5;
-        
-        // Habilitar sombras si hay luz direccional (asegúrate de que tu 'dirLight' tenga shadowGenerator)
-        // const shadowGenerator = new BABYLON.ShadowGenerator(1024, dirLight);
-        // shadowGenerator.addShadowCaster(ball);
-        
+        ball.isVisible = false;
+
         refs.ballRef.current = ball;
 
-        // 3. Efecto de Estela (Trail) para velocidad
-        // Crea un rastro que sigue a la pelota
-        const trail = new BABYLON.TrailMesh("ballTrail", ball, scene, 0.4, 30, true);
+        const trail = new BABYLON.TrailMesh('ballTrail', ball, scene, 0.4, 30, true);
         
         const trailMat = new BABYLON.StandardMaterial("trailMat", scene);
         trailMat.emissiveColor = new BABYLON.Color3(1, 1, 1); // Blanco brillante
@@ -449,7 +422,20 @@ export function createGameScene(canvas, { refs, isMobileRef, onSceneReady, onLoa
         // a opacidad/color (azul→naranja) para que solo destaque en disparos rápidos.
         let trailPrevPos = ball.position.clone();
 
-        // --- FIN MEJORA BALÓN ---
+        BABYLON.SceneLoader.ImportMeshAsync('', '/models/', 'ball.glb', scene).then((result) => {
+            const visualBall = result.meshes[0];
+            visualBall.normalizeToUnitCube();
+            visualBall.parent = ball;
+
+            result.meshes.forEach((mesh) => {
+                if (mesh.material?.getClassName?.() === 'PBRMaterial') {
+                    mesh.material.roughness = 0.2;
+                    mesh.material.metallic = 0.05;
+                }
+            });
+        }).catch((error) => {
+            console.error('Error cargando modelo del balón:', error);
+        });
 
         // --- PORTERÍAS ---
         createGoal(scene, new BABYLON.Vector3(-FIELD_WIDTH / 2, 0, 0), true);
