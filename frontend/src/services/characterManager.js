@@ -213,10 +213,15 @@ class CharacterManager {
         if (playerData.instanced) {
             (playerData.instanced.animationGroups || []).forEach((g) => safe(() => { g.stop(); g.dispose(); }));
             (playerData.instanced.skeletons || []).forEach((s) => safe(() => s.dispose()));
-            (playerData.instanced.rootNodes || []).forEach((n) => safe(() => n.dispose(false, true)));
+            // IMPORTANTE: dispose(doNotRecurse=false, disposeMaterialAndTextures=FALSE).
+            // Las instancias comparten material/textura con el AssetContainer
+            // (cloneMaterials=false). Si liberásemos materiales/texturas aquí,
+            // dejaríamos sin textura al resto de jugadores y a los clones futuros
+            // (p. ej. al reconstruir mallas en una nueva partida).
+            (playerData.instanced.rootNodes || []).forEach((n) => safe(() => n.dispose(false, false)));
         } else {
             Object.values(playerData.animations).forEach((animation) => safe(() => { animation.stop(); animation.dispose(); }));
-            if (playerData.mesh) safe(() => playerData.mesh.dispose());
+            if (playerData.mesh) safe(() => playerData.mesh.dispose(false, false));
         }
 
         if (playerData.root) safe(() => playerData.root.dispose());
