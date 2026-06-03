@@ -153,7 +153,7 @@ export function createUpdateGameState(refs) {
             nameText.textVerticalAlignment = GUI.Control.VERTICAL_ALIGNMENT_CENTER;
             playerLabel.addControl(nameText);
             playerLabel.linkWithMesh(playerInstance);
-            playerLabel.linkOffsetY = isMobileView ? -50 : -120;
+            playerLabel.linkOffsetY = isMobileView ? -95 : -120;
             playerLabel.zIndex = 1;
             playersLabelsRef.current[playerData.id] = playerLabel;
 
