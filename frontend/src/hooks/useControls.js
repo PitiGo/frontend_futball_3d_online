@@ -15,7 +15,6 @@ export function useControls({ socketRef, gameStarted, isConnected, chatInputFocu
   const joystickMoveRef = useRef({ x: 0, z: 0 });
   const lastEmittedMoveRef = useRef({ x: 0, z: 0 });
   const lastEmitTimeRef = useRef(0);
-  const sprintActiveRef = useRef(false);
   const gameStartedRef = useRef(gameStarted);
 
   useEffect(() => {
@@ -49,18 +48,6 @@ export function useControls({ socketRef, gameStarted, isConnected, chatInputFocu
       lastEmitTimeRef.current = now;
     }
   }, [socketRef]);
-
-  const setSprint = useCallback(
-    (active) => {
-      const next = !!active;
-      if (next === sprintActiveRef.current) return;
-      sprintActiveRef.current = next;
-      if (socketRef.current) {
-        socketRef.current.emit('sprint', { active: next });
-      }
-    },
-    [socketRef]
-  );
 
   const handleDirectionChange = useCallback(
     (direction) => {
@@ -114,15 +101,12 @@ export function useControls({ socketRef, gameStarted, isConnected, chatInputFocu
           // ballControl must stay non-volatile — possession start/end must not be dropped.
           socketRef.current.emit('ballControl', { control: true });
           break;
-        case 'shift':
-          setSprint(true);
-          break;
         default:
           break;
       }
       if (keyChanged) sendMovement();
     },
-    [chatInputFocusRef, isConnected, sendMovement, setSprint, socketRef]
+    [chatInputFocusRef, isConnected, sendMovement, socketRef]
   );
 
   const handleKeyUp = useCallback(
@@ -152,15 +136,12 @@ export function useControls({ socketRef, gameStarted, isConnected, chatInputFocu
           // ballControl must stay non-volatile — possession start/end must not be dropped.
           socketRef.current.emit('ballControl', { control: false });
           break;
-        case 'shift':
-          setSprint(false);
-          break;
         default:
           break;
       }
       if (keyChanged) sendMovement();
     },
-    [chatInputFocusRef, isConnected, sendMovement, setSprint, socketRef]
+    [chatInputFocusRef, isConnected, sendMovement, socketRef]
   );
 
   useEffect(() => {
@@ -179,8 +160,7 @@ export function useControls({ socketRef, gameStarted, isConnected, chatInputFocu
   const resetMovement = useCallback(() => {
     keysPressed.current = { up: false, down: false, left: false, right: false };
     joystickMoveRef.current = { x: 0, z: 0 };
-    setSprint(false);
-  }, [setSprint]);
+  }, []);
 
-  return { handleDirectionChange, sendMovement, resetMovement, setSprint };
+  return { handleDirectionChange, sendMovement, resetMovement };
 }

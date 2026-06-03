@@ -120,6 +120,12 @@ export function playGoal() {
   noiseBurst({ dur: 0.4, gain: 0.07, filterFreq: 3000, type: 'highpass' });
 }
 
+/** Speed item pickup: bright ascending sparkle. */
+export function playItem() {
+  tone({ freq: 880, freqEnd: 1320, type: 'triangle', dur: 0.12, gain: 0.16 });
+  tone({ freq: 1320, type: 'sine', dur: 0.1, gain: 0.12, delay: 0.07 });
+}
+
 /** Referee whistle for kickoff. */
 export function playWhistle() {
   tone({ freq: 2200, type: 'sine', dur: 0.16, gain: 0.14 });

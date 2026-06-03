@@ -49,6 +49,7 @@ const TeamSelectionScreen = ({
   onToggleReady,
   onAddBot,
   onRemoveBot,
+  onRenameBot,
   currentTeam,
   playerName,
   gameInProgress,
@@ -148,6 +149,38 @@ const TeamSelectionScreen = ({
 
   const getTeamName = (team) => team === 'left' ? t('teamSelection.mammals') : t('teamSelection.reptiles');
   const getTeamColor = (team) => team === 'left' ? '#3b82f6' : '#ef4444';
+
+  const isBotPlayer = (player) => player?.isBot || (typeof player?.id === 'string' && player.id.startsWith('bot-'));
+
+  const promptRenameBot = (player) => {
+    if (!onRenameBot) return;
+    const base = (player.name || '').replace(/\s*\(bot\)\s*$/i, '');
+    const next = window.prompt(t('teamSelection.renameBotPrompt'), base);
+    if (next !== null) onRenameBot(player.id, next);
+  };
+
+  const renderRenameBotButton = (player) => {
+    if (!isBotPlayer(player) || !onRenameBot) return null;
+    return (
+      <button
+        type="button"
+        title={t('teamSelection.renameBot')}
+        onClick={() => promptRenameBot(player)}
+        style={{
+          marginLeft: '0.25rem',
+          padding: '0 0.3rem',
+          background: 'transparent',
+          border: 'none',
+          cursor: 'pointer',
+          color: '#6b7280',
+          fontSize: '0.8rem',
+          lineHeight: 1,
+        }}
+      >
+        ✎
+      </button>
+    );
+  };
 
   const renderBotControls = (team) => {
     if (!onAddBot) return null;
@@ -325,6 +358,7 @@ const TeamSelectionScreen = ({
                           ({teamCharacters['left'].find(c => c.id === player.characterType)?.name})
                         </small>
                       )}
+                      {renderRenameBotButton(player)}
                     </div>
                     <span style={{
                       color: getReadyStatus('left', player.id) ? '#22c55e' : '#94a3b8',
@@ -428,6 +462,7 @@ const TeamSelectionScreen = ({
                           ({teamCharacters['right'].find(c => c.id === player.characterType)?.name})
                         </small>
                       )}
+                      {renderRenameBotButton(player)}
                     </div>
                     <span style={{
                       color: getReadyStatus('right', player.id) ? '#22c55e' : '#94a3b8',

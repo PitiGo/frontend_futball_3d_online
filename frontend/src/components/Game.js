@@ -12,7 +12,7 @@ import { useSearchParams } from 'react-router-dom';
 import { useControls } from '../hooks/useControls';
 import { useScene } from '../hooks/useScene';
 import { useGameSocket } from '../hooks/useGameSocket';
-import { initAudio, playGoal, playWhistle, playBounce, toggleMuted, isMuted } from '../services/sound';
+import { initAudio, playGoal, playWhistle, playBounce, playItem, toggleMuted, isMuted } from '../services/sound';
 
 const MAX_CHAT_MESSAGES = 50;
 
@@ -52,6 +52,7 @@ const Game = () => {
     const playersLabelsRef = useRef({}); // Referencia para las etiquetas de los jugadores
     const advancedTextureRef = useRef(null); // Referencia para la GUI
     const ballRef = useRef(null);
+    const itemsRef = useRef({});
     const scoreTextRef = useRef(null);
     const staminaFillRef = useRef(null);
     const staminaContainerRef = useRef(null);
@@ -185,7 +186,7 @@ const Game = () => {
     const chatMessagesRef = useRef(null);
     const [isMobileChatExpanded, setIsMobileChatExpanded] = useState(false);
 
-    const { handleDirectionChange, resetMovement, setSprint } = useControls({
+    const { handleDirectionChange, resetMovement } = useControls({
         socketRef,
         gameStarted,
         isConnected,
@@ -208,6 +209,7 @@ const Game = () => {
         playersLabelsRef,
         advancedTextureRef,
         ballRef,
+        itemsRef,
         scoreTextRef,
         characterManagerRef,
         controlEffectsRef,
@@ -325,6 +327,7 @@ const Game = () => {
             }
         },
         onBallBounce: () => playBounce(),
+        onItemCollected: () => playItem(),
         onChatUpdate: (message) => setChatMessages((prev) => [...prev.slice(-(MAX_CHAT_MESSAGES - 1)), message]),
         onPlayersListUpdate: (list) => {
             syncPlayerMeta(playerMetaRef, list);
@@ -369,6 +372,10 @@ const Game = () => {
 
     const handleRemoveBot = useCallback((team) => {
         socketRef.current?.emit('removeBot', { team });
+    }, []);
+
+    const handleRenameBot = useCallback((botId, name) => {
+        socketRef.current?.emit('renameBot', { botId, name });
     }, []);
 
     // Al terminar una partida, volver a la pantalla de selección conservando
@@ -542,6 +549,7 @@ const Game = () => {
                         onToggleReady={handleToggleReady}
                         onAddBot={handleAddBot}
                         onRemoveBot={handleRemoveBot}
+                        onRenameBot={handleRenameBot}
                         currentTeam={currentTeam}
                         playerName={playerName}
                         gameInProgress={gameInProgress}
@@ -909,7 +917,6 @@ const Game = () => {
                                             socketRef.current.emit('ballControl', { control });
                                         }
                                     }}
-                                    onSprintChange={setSprint}
                                 />
                         )}
 

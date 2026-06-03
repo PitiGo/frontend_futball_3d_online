@@ -67,153 +67,80 @@ class CharacterManager {
             throw new Error(`Tipo de personaje ${characterType} no encontrado`);
         }
 
-        return new Promise((resolve, reject) => {
-            const assetsManager = new BABYLON.AssetsManager(this.scene);
-            const task = assetsManager.addMeshTask(
-                `load-${characterType}`,
-                "",
-                "",
-                characterData.modelPath
-            );
+        const path = characterData.modelPath;
+        const slash = path.lastIndexOf('/') + 1;
+        const rootUrl = path.substring(0, slash);
+        const fileName = path.substring(slash);
 
-            task.onSuccess = (task) => {
-                console.log(`Modelo ${characterType} cargado exitosamente`);
-                console.log('Animaciones disponibles:', task.loadedAnimationGroups.map(g => g.name));
+        // Cargamos en un AssetContainer (no se añade a la escena). Cada jugador se
+        // crea con `instantiateModelsToScene`, que clona malla, ESQUELETO y
+        // animaciones de forma independiente por instancia. Esto evita que dos
+        // jugadores del mismo personaje compartan el esqueleto (y, por tanto, la
+        // misma animación).
+        const container = await BABYLON.SceneLoader.LoadAssetContainerAsync(
+            rootUrl,
+            fileName,
+            this.scene,
+        );
 
-                const rootMesh = task.loadedMeshes[0];
-                rootMesh.setEnabled(false);
-
-                let skeleton = task.loadedSkeletons.length > 0 ? task.loadedSkeletons[0] : null;
-
-                // Mapear las animaciones usando los nombres exactos definidos en charactersData
-                const animations = {};
-                const expectedAnimations = this.charactersData[characterType].animations;
-
-                task.loadedAnimationGroups.forEach(group => {
-                    // Buscar la animación correspondiente
-                    for (const [key, expectedName] of Object.entries(expectedAnimations)) {
-                        if (group.name === expectedName) {
-                            animations[key] = group;
-                            console.log(`Asignada animación ${group.name} como ${key}`);
-                            break;
-                        }
-                    }
-                });
-
-                // Verificar que todas las animaciones necesarias están presentes
-                const missingAnimations = Object.keys(expectedAnimations)
-                    .filter(key => !animations[key]);
-
-                if (missingAnimations.length > 0) {
-                    console.warn(`Animaciones faltantes para ${characterType}:`, missingAnimations);
-                }
-
-                // Evitar el autoplay del primer AnimationGroup del glTF: las animaciones
-                // originales mueven el esqueleto compartido y harían que los clones
-                // aparezcan "corriendo" antes de recibir su primer estado del servidor.
-                // Cada instancia controla su propia copia (idle por defecto).
-                task.loadedAnimationGroups.forEach((group) => {
-                    group.stop();
-                    group.reset();
-                });
-
-                this.loadedCharacters.set(characterType, {
-                    mesh: rootMesh,
-                    skeleton: skeleton,
-                    animationGroups: animations
-                });
-
-                this.animationGroups.set(characterType, animations);
-
-                resolve({
-                    mesh: rootMesh,
-                    skeleton: skeleton,
-                    animationGroups: animations
-                });
-            };
-
-            task.onError = (task, message, exception) => {
-                console.error(`Error cargando personaje ${characterType}:`, message, exception);
-                reject(new Error(`Error al cargar personaje ${characterType}: ${message}`));
-            };
-
-            assetsManager.load();
+        // Detener las animaciones del contenedor para que no se reproduzcan en los
+        // originales ni se "filtren" a las instancias recién creadas.
+        container.animationGroups.forEach((group) => {
+            group.stop();
+            group.reset();
         });
+
+        const entry = { container };
+        this.loadedCharacters.set(characterType, entry);
+        return entry;
     }
 
     async createPlayerInstance(playerId, characterType, team) {
         try {
-            console.log(`Creando instancia para jugador ${playerId} con personaje ${characterType}`);
-            const characterData = await this.loadCharacter(characterType);
+            const { container } = await this.loadCharacter(characterType);
+            const scale = this.charactersData[characterType].scale;
+            const expectedAnimations = this.charactersData[characterType].animations;
+
+            // `doNotInstantiate: true` fuerza CLONES completos (con su propio
+            // esqueleto), no instancias GPU que compartirían el esqueleto. Es la
+            // base para que cada jugador anime de forma independiente.
+            const instanced = container.instantiateModelsToScene(
+                (name) => `${name}-${playerId}`,
+                false,
+                { doNotInstantiate: true },
+            );
 
             const playerRoot = new BABYLON.TransformNode(`player-root-${playerId}`, this.scene);
-            const playerInstance = characterData.mesh.clone(`player-${playerId}`);
-            playerInstance.setEnabled(true);
-            playerInstance.parent = playerRoot;
+            playerRoot.scaling = new BABYLON.Vector3(scale, scale, scale);
 
-            playerRoot.scaling = new BABYLON.Vector3(
-                this.charactersData[characterType].scale,
-                this.charactersData[characterType].scale,
-                this.charactersData[characterType].scale
-            );
+            const rootNode = instanced.rootNodes[0];
+            rootNode.parent = playerRoot;
+            rootNode.rotationQuaternion = null;
+            rootNode.rotation = new BABYLON.Vector3(0, Math.PI, 0);
+            rootNode.position.y = 1.0; // Corrige el hundimiento del modelo.
 
-            // Ajustar rotación
-            playerInstance.rotationQuaternion = null;
-            playerInstance.rotation = new BABYLON.Vector3(
-                0,       // No rotación en X para mantenerlo vertical
-                Math.PI, // Rotación en Y para orientarlo hacia la dirección correcta
-                0        // No rotación en Z
-            );
-
-            // Ajustar posición vertical para corregir el hundimiento
-            playerInstance.position.y = 1.0; // Ajusta este valor si es necesario
-
-            // --- CÓDIGO MEJORADO para clonar animaciones ---
-            const playerAnimations = {};
-            if (characterData.animationGroups) {
-                Object.entries(characterData.animationGroups).forEach(([name, group]) => {
-                    if (!group) {
-                        console.warn(`El grupo de animación '${name}' está nulo o indefinido para el personaje.`);
-                        return; // Saltar este grupo de animación
+            // Mapear las animaciones instanciadas (propias de esta instancia) a
+            // las claves lógicas idle/running/dancing.
+            const animations = {};
+            instanced.animationGroups.forEach((group) => {
+                for (const [key, expectedName] of Object.entries(expectedAnimations)) {
+                    if (group.name === expectedName || group.name.includes(expectedName)) {
+                        animations[key] = group;
+                        break;
                     }
-
-                    // Re-apunta las animaciones a la nueva malla y su esqueleto
-                    const clonedGroup = group.clone(`anim-group-${playerId}-${name}`);
-
-                    // La propiedad `targetedAnimations` contiene las animaciones individuales y sus objetivos.
-                    // Tenemos que re-dirigir cada una de ellas.
-                    clonedGroup.targetedAnimations.forEach(targetedAnim => {
-                        const originalTarget = targetedAnim.target;
-
-                        // Si el objetivo original es la malla raíz, el nuevo objetivo es la instancia clonada.
-                        if (originalTarget === characterData.mesh) {
-                            targetedAnim.target = playerInstance;
-                        }
-                        // Si no, es probable que sea un hueso o un nodo hijo.
-                        // Buscamos un descendiente en la nueva instancia con el mismo nombre.
-                        else {
-                            const newTarget = playerInstance.getDescendants(false).find(d => d.name === originalTarget.name);
-                            if (newTarget) {
-                                targetedAnim.target = newTarget;
-                            } else {
-                                console.warn(`No se pudo encontrar el nuevo target para la animación '${targetedAnim.animation.name}' en el target original '${originalTarget.name}'`);
-                            }
-                        }
-                    });
-
-                    clonedGroup.stop(); // Detener la animación clonada por defecto.
-                    playerAnimations[name] = clonedGroup;
-                    console.log(`Clonada y re-dirigida la animación ${name} para el jugador ${playerId}`);
-                });
-            }
+                }
+                group.stop();
+                group.reset();
+            });
 
             this.playerInstances.set(playerId, {
                 root: playerRoot,
-                mesh: playerInstance,
-                animations: playerAnimations,
+                mesh: rootNode,
+                instanced,
+                animations,
                 currentAnimation: null,
                 characterType,
-                team
+                team,
             });
 
             // Iniciar con la animación idle
@@ -225,6 +152,13 @@ class CharacterManager {
             console.error('Error al crear instancia de jugador:', error);
             throw error;
         }
+    }
+
+    // Información del modelo actualmente renderizado para un jugador. Permite a
+    // updateGameState detectar cambios de personaje/equipo y reconstruir la malla.
+    getInstanceInfo(playerId) {
+        const data = this.playerInstances.get(playerId);
+        return data ? { characterType: data.characterType, team: data.team } : null;
     }
 
     startAnimation(playerId, animationName, loop = true) {
@@ -269,15 +203,24 @@ class CharacterManager {
 
     removePlayer(playerId) {
         const playerData = this.playerInstances.get(playerId);
-        if (playerData) {
-            Object.values(playerData.animations).forEach(animation => {
-                animation.stop();
-                animation.dispose();
-            });
-            playerData.mesh.dispose();
-            playerData.root.dispose();
-            this.playerInstances.delete(playerId);
+        if (!playerData) return;
+
+        const safe = (fn) => { try { fn(); } catch (e) { /* noop */ } };
+
+        // Las animaciones mapeadas son un subconjunto de las instanciadas; se
+        // detienen y se liberan todas desde `instanced` para no dejar grupos
+        // huérfanos animando un esqueleto ya eliminado.
+        if (playerData.instanced) {
+            (playerData.instanced.animationGroups || []).forEach((g) => safe(() => { g.stop(); g.dispose(); }));
+            (playerData.instanced.skeletons || []).forEach((s) => safe(() => s.dispose()));
+            (playerData.instanced.rootNodes || []).forEach((n) => safe(() => n.dispose(false, true)));
+        } else {
+            Object.values(playerData.animations).forEach((animation) => safe(() => { animation.stop(); animation.dispose(); }));
+            if (playerData.mesh) safe(() => playerData.mesh.dispose());
         }
+
+        if (playerData.root) safe(() => playerData.root.dispose());
+        this.playerInstances.delete(playerId);
     }
 
     dispose() {
@@ -285,8 +228,10 @@ class CharacterManager {
             this.removePlayer(playerId);
         });
 
-        this.loadedCharacters.forEach((characterData) => {
-            characterData.mesh.dispose();
+        this.loadedCharacters.forEach((entry) => {
+            if (entry?.container) {
+                try { entry.container.dispose(); } catch (e) { /* noop */ }
+            }
         });
 
         this.loadedCharacters.clear();

@@ -438,6 +438,14 @@ export function createGameScene(canvas, { refs, isMobileRef, onSceneReady, onLoa
         }
 
         refs.sceneRef.current.registerBeforeRender(() => {
+            // Giro continuo de los ítems de velocidad (efecto power-up).
+            const items = refs.itemsRef.current;
+            if (items) {
+                for (const id in items) {
+                    if (items[id]) items[id].rotation.y += 0.05;
+                }
+            }
+
             if (refs.ballRef.current && refs.controlEffectsRef.current) {
                 refs.controlEffectsRef.current.ballHalo.position = refs.ballRef.current.position.clone();
                 refs.controlEffectsRef.current.ballHalo.rotation.y += 0.02;

@@ -1,9 +1,8 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
 
-const MobileJoystick = ({ onDirectionChange, onBallControlChange, onSprintChange }) => {
+const MobileJoystick = ({ onDirectionChange, onBallControlChange }) => {
     const [isActive, setIsActive] = useState(false);
     const [stickPosition, setStickPosition] = useState({ x: 0, y: 0 });
-    const [isSprinting, setIsSprinting] = useState(false);
     const [isKicking, setIsKicking] = useState(false);
     const [kickChargeTime, setKickChargeTime] = useState(0);
     const joystickRef = useRef(null);
@@ -146,20 +145,6 @@ const MobileJoystick = ({ onDirectionChange, onBallControlChange, onSprintChange
             }
         };
     }, []);
-
-    const handleSprintStart = useCallback((e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        setIsSprinting(true);
-        onSprintChange && onSprintChange(true);
-    }, [onSprintChange]);
-
-    const handleSprintEnd = useCallback((e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        setIsSprinting(false);
-        onSprintChange && onSprintChange(false);
-    }, [onSprintChange]);
 
     // Calcular color del botón según la carga
     const getKickButtonColor = () => {
@@ -307,45 +292,6 @@ const MobileJoystick = ({ onDirectionChange, onBallControlChange, onSprintChange
                 <span style={{ fontSize: `${Math.round(sizes.buttonSize * 0.15)}px`, marginTop: '2px' }}>
                     {isKicking ? `${kickChargeTime.toFixed(1)}s` : 'KICK'}
                 </span>
-            </button>
-
-            {/* Botón SPRINT - Encima del botón KICK */}
-            <button
-                onMouseDown={handleSprintStart}
-                onMouseUp={handleSprintEnd}
-                onMouseLeave={handleSprintEnd}
-                onTouchStart={handleSprintStart}
-                onTouchEnd={handleSprintEnd}
-                onTouchCancel={handleSprintEnd}
-                style={{
-                    position: 'fixed',
-                    bottom: `${30 + sizes.buttonSize + 18}px`,
-                    right: '30px',
-                    width: `${Math.round(sizes.buttonSize * 0.8)}px`,
-                    height: `${Math.round(sizes.buttonSize * 0.8)}px`,
-                    borderRadius: '50%',
-                    background: isSprinting
-                        ? 'rgba(56, 189, 248, 0.95)'
-                        : 'rgba(30, 64, 110, 0.8)',
-                    color: 'white',
-                    border: `3px solid ${isSprinting ? 'rgba(255,255,255,0.85)' : 'rgba(255,255,255,0.4)'}`,
-                    fontSize: `${Math.round(sizes.buttonSize * 0.28)}px`,
-                    fontWeight: 800,
-                    touchAction: 'none',
-                    userSelect: 'none',
-                    zIndex: 1001,
-                    boxShadow: isSprinting
-                        ? '0 0 25px rgba(56, 189, 248, 0.6), 0 4px 12px rgba(0,0,0,0.4)'
-                        : '0 4px 16px rgba(0, 0, 0, 0.4)',
-                    transform: isSprinting ? 'scale(1.1)' : 'scale(1)',
-                    transition: 'transform 0.1s, box-shadow 0.1s, background 0.1s',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    cursor: 'pointer'
-                }}
-            >
-                ⚡
             </button>
 
             {/* Indicador de carga circular alrededor del botón KICK */}

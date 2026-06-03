@@ -31,6 +31,7 @@ export function createUpdateGameState(refs) {
     playersLabelsRef,
     advancedTextureRef,
     ballRef,
+    itemsRef,
     scoreTextRef,
     controlEffectsRef,
     socketRef,
@@ -44,6 +45,10 @@ export function createUpdateGameState(refs) {
     chargeFillRef,
     chargeContainerRef,
   } = refs;
+
+  // Tracks players whose mesh is being created asynchronously, to avoid
+  // spawning duplicates across ticks while createPlayerInstance is in flight.
+  const creatingPlayers = new Set();
 
   // Closure state to detect sudden ball acceleration (kicks/shots) for SFX.
   let prevBallPos = null;
@@ -64,6 +69,7 @@ export function createUpdateGameState(refs) {
       controlRemainingMs,
       matchTimeLeftMs,
       shotCharge,
+      items,
     } = gameState;
     const isMobileView = isMobileRef.current;
 
@@ -91,11 +97,42 @@ export function createUpdateGameState(refs) {
           };
         }
 
-        if (!playersRef.current[playerData.id]) {
+        const meta = playerMetaRef.current[playerData.id] || {};
+        const knownCharacter = playerData.characterType || meta.characterType;
+        const knownTeam = playerData.team || meta.team;
+        const desiredCharacter = knownCharacter || 'player';
+        const desiredTeam = knownTeam;
+
+        // If the rendered mesh no longer matches the player's character/team
+        // (e.g. they switched team or character between matches), tear it down so
+        // it is rebuilt below with the correct model and team color. We only act
+        // when both character and team are actually known, to avoid rebuilding to
+        // a default model while a selection is still pending.
+        const rendered = characterManagerRef.current.getInstanceInfo?.(playerData.id);
+        if (
+          playersRef.current[playerData.id] &&
+          rendered &&
+          knownCharacter &&
+          knownTeam &&
+          (rendered.characterType !== knownCharacter || rendered.team !== knownTeam)
+        ) {
           try {
-            const meta = playerMetaRef.current[playerData.id] || {};
-            const characterType = playerData.characterType || meta.characterType || 'player';
-            const team = playerData.team || meta.team;
+            characterManagerRef.current.removePlayer(playerData.id);
+            delete playersRef.current[playerData.id];
+            if (playersLabelsRef.current[playerData.id]) {
+              playersLabelsRef.current[playerData.id].dispose();
+              delete playersLabelsRef.current[playerData.id];
+            }
+          } catch (error) {
+            console.error('Error reconstruyendo jugador:', error);
+          }
+        }
+
+        if (!playersRef.current[playerData.id] && !creatingPlayers.has(playerData.id)) {
+          creatingPlayers.add(playerData.id);
+          try {
+            const characterType = desiredCharacter;
+            const team = desiredTeam;
             const name = playerData.name || meta.name || '';
 
             const playerInstance = await characterManagerRef.current.createPlayerInstance(
@@ -137,14 +174,14 @@ export function createUpdateGameState(refs) {
             }
           } catch (error) {
             console.error('Error creando instancia de jugador:', error);
+          } finally {
+            creatingPlayers.delete(playerData.id);
           }
         }
 
         const playerInstance = playersRef.current[playerData.id];
         if (playerInstance) {
-          const meta = playerMetaRef.current[playerData.id] || {};
-          const characterType = playerData.characterType || meta.characterType;
-          const visualY = getPlayerVisualY(characterType);
+          const visualY = getPlayerVisualY(desiredCharacter);
           const currentPosition = playerInstance.position;
           const targetPosition = new BABYLON.Vector3(
             playerData.position.x,
@@ -227,6 +264,40 @@ export function createUpdateGameState(refs) {
         ballRef.current.rotate(rotationAxis, speed * 8, BABYLON.Space.WORLD);
       }
       ballRef.current.position = lerpToward(currentPosition, targetPosition, BALL_SNAP_DISTANCE);
+    }
+
+    // Ítems de velocidad: crear/posicionar/eliminar según el estado autoritativo.
+    if (itemsRef && sceneRef.current && Array.isArray(items)) {
+      const scene = sceneRef.current;
+      const activeIds = new Set();
+      items.forEach((it) => {
+        if (!it?.id) return;
+        activeIds.add(it.id);
+        let mesh = itemsRef.current[it.id];
+        if (!mesh) {
+          // Octaedro brillante tipo "power-up".
+          mesh = BABYLON.MeshBuilder.CreatePolyhedron(`item-${it.id}`, { type: 1, size: 0.45 }, scene);
+          const mat = new BABYLON.StandardMaterial(`itemMat-${it.id}`, scene);
+          mat.emissiveColor = new BABYLON.Color3(0.2, 0.9, 1);
+          mat.diffuseColor = new BABYLON.Color3(0.2, 0.9, 1);
+          mat.specularColor = new BABYLON.Color3(0, 0, 0);
+          mat.disableLighting = true;
+          mesh.material = mat;
+          mesh.isPickable = false;
+          itemsRef.current[it.id] = mesh;
+        }
+        mesh.position.set(it.x, 0.9, it.z);
+      });
+      Object.keys(itemsRef.current).forEach((id) => {
+        if (!activeIds.has(id)) {
+          const mesh = itemsRef.current[id];
+          if (mesh) {
+            if (mesh.material) mesh.material.dispose();
+            mesh.dispose();
+          }
+          delete itemsRef.current[id];
+        }
+      });
     }
 
     if (scoreTextRef.current && score) {

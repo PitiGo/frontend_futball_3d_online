@@ -100,12 +100,20 @@ const KICKOFF_FREEZE_MS = 2000;
 // Duración del partido (parametrizable). Al agotarse, gana quien tenga más goles.
 const MATCH_DURATION_MS = (parseInt(process.env.MATCH_DURATION_SEC, 10) || 180) * 1000;
 
-// --- Sprint / Stamina ---
-const SPRINT_SPEED_MULTIPLIER = 1.55; // Boost de velocidad mientras se esprinta
+// --- Boost de velocidad (por ítems) ---
+// La velocidad extra ya no se activa con una tecla: se obtiene recogiendo ítems
+// en la cancha. Al recoger uno, la "stamina" (combustible del boost) se rellena
+// al máximo y el jugador corre más rápido mientras se gasta al moverse. No hay
+// regeneración pasiva: solo los ítems recargan el boost.
+const SPEED_BOOST_MULTIPLIER = 1.55; // Velocidad extra mientras el boost está activo
 const STAMINA_MAX = 100;
-const STAMINA_DRAIN_PER_SEC = 32;   // Gasto al esprintar
-const STAMINA_REGEN_PER_SEC = 18;   // Recuperación cuando no se esprinta
-const STAMINA_RECOVER_THRESHOLD = 30; // Tras agotarse, hay que recuperar hasta aquí para volver a esprintar
+const STAMINA_DRAIN_PER_SEC = 32;    // Gasto del boost al moverse
+
+// --- Ítems de velocidad en la cancha ---
+const ITEM_RADIUS = 0.6;             // Radio de recogida del ítem
+const MAX_ITEMS = 3;                 // Máximo de ítems simultáneos en el campo
+const ITEM_SPAWN_INTERVAL_MS = 7000; // Cada cuánto aparece un ítem nuevo
+const ITEM_EDGE_MARGIN = 4;          // Margen desde los bordes para no spawnear pegado al muro
 
 const TEAM_CHARACTERS = {
   left: ['player', 'pig'],
@@ -163,6 +171,9 @@ availableSalas.forEach(roomId => {
     botCounter: 0, // Contador para nombrar/identificar bots
     lastSent: new Map(), // id -> snapshot enviado (delta compression)
     emitCount: 0, // Contador de emisiones para keyframes periódicos
+    items: [], // Ítems de velocidad activos en la cancha: { id, x, z }
+    itemCounter: 0, // Contador para identificar ítems
+    lastItemSpawn: 0, // Timestamp del último spawn de ítem
   };
 });
 
@@ -251,10 +262,9 @@ function resetPlayersPositions(roomId, state, kickoffTeam = null) {
     player.isControllingBall = false;
     player.ballControlTime = 0;
     player.lastKickTime = 0;
-    player.stamina = STAMINA_MAX;
-    player.wantSprint = false;
+    player.stamina = 0;
+    player.boosted = false;
     player.isSprinting = false;
-    player.exhausted = false;
     // Asegurarse de que el estado de movimiento esté inicializado
     if (!state.playerMovements.has(player.id)) {
       state.playerMovements.set(player.id, { moveDirection: Vector3.Zero() });
@@ -262,6 +272,9 @@ function resetPlayersPositions(roomId, state, kickoffTeam = null) {
       state.playerMovements.get(player.id).moveDirection.set(0, 0, 0);
     }
   });
+  // Limpiar ítems en cada saque para que no se recojan justo al reanudar.
+  state.items = [];
+  state.lastItemSpawn = performance.now();
   if (state.players.size > 0) {
     emitGameState(roomId, state);
   }
@@ -273,7 +286,7 @@ function getTeamStatus(state) {
   const getPlayerInfo = (id) => {
     const p = state.players.get(id);
     // Incluir 'ready' aquí también podría ser útil para la UI de equipos
-    return p ? { id: p.id, name: p.name, characterType: p.characterType, ready: p.ready } : null;
+    return p ? { id: p.id, name: p.name, characterType: p.characterType, ready: p.ready, isBot: !!p.isBot } : null;
   };
 
   return {
@@ -451,6 +464,8 @@ function resetFullRoomState(roomId, state) {
   state.currentGameState = gameStates.WAITING;
   state.score = { left: 0, right: 0 };
   state.gameOverData = null;
+  state.items = [];
+  state.lastItemSpawn = 0;
   resetBall(state);
   state.readyState.left.clear();
   state.readyState.right.clear();
@@ -458,10 +473,9 @@ function resetFullRoomState(roomId, state) {
   // Reposicionar jugadores y resetear estado 'listo'
   state.players.forEach(player => {
     player.isControllingBall = false;
-    player.stamina = STAMINA_MAX;
-    player.wantSprint = false;
+    player.stamina = 0;
+    player.boosted = false;
     player.isSprinting = false;
-    player.exhausted = false;
     // Los bots vuelven a quedar listos automáticamente. Los humanos conservan
     // su equipo y personaje, pero deben volver a pulsar "Listo".
     if (player.isBot && player.team) {
@@ -603,6 +617,7 @@ function createBot(state, team) {
   const bot = {
     id,
     name: `Bot ${state.botCounter}`,
+    botNumber: state.botCounter,
     team,
     characterType,
     position: getSpawnPosition(team),
@@ -613,10 +628,9 @@ function createBot(state, team) {
     isControllingBall: false,
     ballControlTime: 0,
     lastKickTime: 0,
-    stamina: STAMINA_MAX,
-    wantSprint: false,
+    stamina: 0,
+    boosted: false,
     isSprinting: false,
-    exhausted: false,
     goals: 0,
   };
   state.players.set(id, bot);
@@ -717,6 +731,53 @@ function updateBotAI(state) {
   });
 }
 
+// --- Ítems de velocidad ---
+// Genera un ítem en una posición aleatoria de la cancha (con margen desde los
+// bordes y evitando el centro exacto del saque).
+function spawnItem(state) {
+  if (state.items.length >= MAX_ITEMS) return;
+  state.itemCounter += 1;
+  const halfW = FIELD_WIDTH / 2 - ITEM_EDGE_MARGIN;
+  const halfH = FIELD_HEIGHT / 2 - ITEM_EDGE_MARGIN;
+  let x = 0;
+  let z = 0;
+  // Reintentar hasta alejarse un poco del centro (zona de saque).
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    x = round2((Math.random() * 2 - 1) * halfW);
+    z = round2((Math.random() * 2 - 1) * halfH);
+    if (Math.hypot(x, z) > 3) break;
+  }
+  state.items.push({ id: `item-${state.itemCounter}`, x, z });
+}
+
+// Spawn periódico y detección de recogida por jugadores.
+function updateItems(roomId, state, now) {
+  if (state.items.length < MAX_ITEMS && now - (state.lastItemSpawn || 0) >= ITEM_SPAWN_INTERVAL_MS) {
+    spawnItem(state);
+    state.lastItemSpawn = now;
+  }
+
+  if (state.items.length === 0) return;
+
+  state.players.forEach((player) => {
+    if (!player.team) return;
+    const stats = getCharacterStats(player.characterType);
+    const reach = (stats.radius || PLAYER_RADIUS) + ITEM_RADIUS;
+    const reachSq = reach * reach;
+    for (let i = state.items.length - 1; i >= 0; i -= 1) {
+      const item = state.items[i];
+      const dx = item.x - player.position.x;
+      const dz = item.z - player.position.z;
+      if (dx * dx + dz * dz <= reachSq) {
+        state.items.splice(i, 1);
+        player.stamina = STAMINA_MAX;
+        player.boosted = true;
+        io.to(roomId).emit('itemCollected', { playerId: player.id, x: item.x, z: item.z });
+      }
+    }
+  });
+}
+
 // --- Bucle Principal de Física y Lógica ---
 function updateGamePhysics(roomId, state) {
   const now = performance.now();
@@ -756,18 +817,20 @@ function updateGamePhysics(roomId, state) {
       return;
     }
 
-    // Sprint / Stamina: drena al esprintar en movimiento, regenera el resto del tiempo.
+    // Boost de velocidad por ítem: se gasta la "stamina" al moverse mientras esté
+    // activo; al agotarse, el boost termina hasta recoger otro ítem.
     const isMoving = movement.moveDirection.lengthSquared() > 0.01;
-    if (player.stamina <= 0) player.exhausted = true;
-    if (player.stamina >= STAMINA_RECOVER_THRESHOLD) player.exhausted = false;
-    const sprinting = player.wantSprint && isMoving && player.stamina > 0 && !player.exhausted;
-    if (sprinting) {
-      player.stamina = Math.max(0, player.stamina - STAMINA_DRAIN_PER_SEC * PHYSICS_DT);
-    } else {
-      player.stamina = Math.min(STAMINA_MAX, player.stamina + STAMINA_REGEN_PER_SEC * PHYSICS_DT);
+    if (player.boosted) {
+      if (isMoving) {
+        player.stamina = Math.max(0, player.stamina - STAMINA_DRAIN_PER_SEC * PHYSICS_DT);
+      }
+      if (player.stamina <= 0) {
+        player.stamina = 0;
+        player.boosted = false;
+      }
     }
-    player.isSprinting = sprinting;
-    const speedFactor = sprinting ? SPRINT_SPEED_MULTIPLIER : 1;
+    player.isSprinting = player.boosted && player.stamina > 0;
+    const speedFactor = player.isSprinting ? SPEED_BOOST_MULTIPLIER : 1;
 
     // Aceleración / frenado suave hacia la velocidad objetivo (inercia arcade)
     const maxSpeed = PLAYER_SPEED * stats.speedMultiplier * speedFactor;
@@ -801,6 +864,9 @@ function updateGamePhysics(roomId, state) {
       Quaternion.FromEulerAnglesToRef(0, angle, 0, player.rotation);
     }
   });
+
+  // Ítems de velocidad: spawn periódico y recogida (posiciones ya actualizadas).
+  updateItems(roomId, state, now);
 
   // 2. Actualizar Pelota
   if (kickoffFrozen) {
@@ -1076,6 +1142,7 @@ function emitGameState(roomId, state) {
     controllingPlayerId,
     controlRemainingMs,
     shotCharge,
+    items: state.items,
   };
 
   // Emitir a la sala específica
@@ -1155,10 +1222,9 @@ io.on('connection', (socket) => {
       isControllingBall: false,
       ballControlTime: 0,
       lastKickTime: 0, // To avoid immediate collision after shot
-      stamina: STAMINA_MAX,   // Energía para esprintar (0..STAMINA_MAX)
-      wantSprint: false,      // Input de sprint del jugador
-      isSprinting: false,     // Estado real de sprint (resuelto en física)
-      exhausted: false,       // Latch: bloquea sprint hasta recuperar stamina
+      stamina: 0,             // Combustible del boost (0..STAMINA_MAX); se recarga con ítems
+      boosted: false,         // Boost de velocidad activo (tras recoger un ítem)
+      isSprinting: false,     // Estado real de boost (resuelto en física), para visuales
       goals: 0,               // Goles anotados en el partido actual
       roomId: roomId // Referencia a su sala
     };
@@ -1321,6 +1387,29 @@ io.on('connection', (socket) => {
     }
   });
 
+  // Handler 'renameBot' — cambia el nombre de un bot. Se conserva el sufijo
+  // "(Bot)" para que siga siendo identificable como bot.
+  socket.on('renameBot', ({ botId, name } = {}) => {
+    if (!currentRoomId) return;
+    const state = salaStates[currentRoomId];
+    if (!state) return;
+    if (state.currentGameState !== gameStates.WAITING && state.currentGameState !== gameStates.GAME_OVER) {
+      return socket.emit('readyError', { message: 'Solo puedes renombrar bots antes de empezar.' });
+    }
+    const bot = state.players.get(botId);
+    if (!bot || !bot.isBot) return;
+    const clean = String(name || '').replace(/\s*\(bot\)\s*$/i, '').trim().slice(0, 20);
+    bot.name = clean ? `${clean} (Bot)` : `Bot ${bot.botNumber || ''}`.trim();
+    log(`[${currentRoomId}] Bot ${botId} renombrado a "${bot.name}".`);
+
+    io.to(currentRoomId).emit('teamUpdate', getTeamStatus(state).teams);
+    io.to(currentRoomId).emit('readyUpdate', getReadyPayload(state));
+    io.to(currentRoomId).emit('playersListUpdate', Array.from(state.players.values()).map(p => ({
+      id: p.id, name: p.name, team: p.team, characterType: p.characterType,
+    })));
+    emitGameState(currentRoomId, state);
+  });
+
   // Handler 'removeBot' — quita un bot de un equipo
   socket.on('removeBot', ({ team } = {}) => {
     if (!currentRoomId) return;
@@ -1365,15 +1454,7 @@ io.on('connection', (socket) => {
   });
 
   // Eliminados handlers playerMoveStart/playerMoveStop en favor de playerMove con vector
-
-  // Handler 'sprint' — activa/desactiva la intención de esprintar del jugador
-  socket.on('sprint', ({ active } = {}) => {
-    if (!currentRoomId) return;
-    const state = salaStates[currentRoomId];
-    const player = state?.players.get(socket.id);
-    if (!player || state.currentGameState !== gameStates.PLAYING) return;
-    player.wantSprint = active === true;
-  });
+  // El sprint manual fue reemplazado por ítems de velocidad en la cancha.
 
   // Handler 'ballControl'
   socket.on('ballControl', ({ control }) => {
