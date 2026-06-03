@@ -92,6 +92,7 @@ const BALL_CONTROL_RADIUS = 1.5;
 const STEAL_GRACE_MS = 500;        // Tras ganar la posesión, no te la pueden robar (evita tira y afloja)
 const STEAL_VICTIM_LOCK_MS = 650;  // Tras perderla, la víctima no puede recuperarla de inmediato
 const STEAL_RADIUS_BONUS = 1.15;   // El alcance de robo es algo mayor que el radio de control
+const PICKUP_RADIUS_BONUS = 1.25;  // La recogida de balón suelto es algo más generosa que el control
 const BOT_STEAL_CHANCE = 0.10;     // Probabilidad por tick de que un bot en rango robe a un rival
 const BOT_STEAL_COOLDOWN_MS = 800; // Separación mínima entre intentos de robo de un bot
 const BALL_RELEASE_MIN = 13; // Minimum shot speed (quick tap)
@@ -267,6 +268,7 @@ function resetPlayersPositions(roomId, state, kickoffTeam = null) {
     player.rotation.copyFromFloats(0, 0, 0, 1); // Mirando Z positivo
     player.isControllingBall = false;
     player.ballControlTime = 0;
+    player.wantsControl = false;
     player.controlProtectedUntil = 0;
     player.controlLockUntil = 0;
     player.lastKickTime = 0;
@@ -481,6 +483,7 @@ function resetFullRoomState(roomId, state) {
   // Reposicionar jugadores y resetear estado 'listo'
   state.players.forEach(player => {
     player.isControllingBall = false;
+    player.wantsControl = false;
     player.stamina = 0;
     player.boosted = false;
     player.isSprinting = false;
@@ -635,6 +638,7 @@ function createBot(state, team) {
     isBot: true,
     isControllingBall: false,
     ballControlTime: 0,
+    wantsControl: false,
     controlProtectedUntil: 0,
     controlLockUntil: 0,
     lastStealTime: 0,
@@ -1113,6 +1117,18 @@ function updateGamePhysics(roomId, state) {
         state.ballVelocity.set(0, 0, 0);
       }
     }
+    // Recogida "pegajosa": si el jugador mantiene ESPACIO (wantsControl), nadie
+    // controla el balón y está a su alcance, lo coge automáticamente. Evita tener
+    // que pulsar en el milisegundo exacto y hace la recogida mucho más fluida.
+    else if (
+      playerCurrentlyControllingId === null &&
+      player.wantsControl &&
+      now >= (player.controlLockUntil || 0) &&
+      distSq < (controlRadius * PICKUP_RADIUS_BONUS) * (controlRadius * PICKUP_RADIUS_BONUS)
+    ) {
+      grantControl(state, player);
+      playerCurrentlyControllingId = player.id;
+    }
     // Colisión Física (si NADIE la controla o si choca con otro jugador)
     else if (distSq < combinedRadiusSq) {
       // If player shot less than 300ms ago, ignore collision
@@ -1337,6 +1353,7 @@ io.on('connection', (socket) => {
       ready: false,
       isControllingBall: false,
       ballControlTime: 0,
+      wantsControl: false,      // Mantiene ESPACIO: recoge el balón en cuanto esté a su alcance
       controlProtectedUntil: 0, // Protección anti-robo tras ganar la posesión
       controlLockUntil: 0,      // Bloqueo de recuperación tras sufrir un robo
       lastKickTime: 0, // To avoid immediate collision after shot
@@ -1584,6 +1601,9 @@ io.on('connection', (socket) => {
     //log(`[${currentRoomId}] -> ballControl de ${player.name}. Control: ${control}`);
 
     if (control === true) {
+      // Intención de control mantenida: la física recogerá el balón en cuanto esté
+      // a tu alcance (recogida pegajosa), sin pulsar en el instante exacto.
+      player.wantsControl = true;
       const now = performance.now();
       // Tras perder el balón en un robo, la víctima no puede recuperarlo al instante.
       if (now < (player.controlLockUntil || 0)) return;
@@ -1597,17 +1617,18 @@ io.on('connection', (socket) => {
         }
         // Si es compañero, no se hace nada.
       } else if (!controller) {
-        // Balón suelto: tomar control si está dentro del radio.
+        // Balón suelto: tomar control si está dentro del radio (generoso).
         const stats = getCharacterStats(player.characterType);
-        const controlRadius = stats.controlRadius || BALL_CONTROL_RADIUS;
+        const pickup = (stats.controlRadius || BALL_CONTROL_RADIUS) * PICKUP_RADIUS_BONUS;
         const toBall = state.ballPosition.subtract(player.position);
         toBall.y = 0;
-        if (toBall.lengthSquared() < controlRadius * controlRadius) {
+        if (toBall.lengthSquared() < pickup * pickup) {
           grantControl(state, player);
           log(`[${currentRoomId}] ${player.name} INICIA control de balón.`);
         }
       }
     } else if (control === false) {
+      player.wantsControl = false;
       // Soltar el balón (disparo)
       if (player.isControllingBall) {
         player.isControllingBall = false;
