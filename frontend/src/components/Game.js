@@ -185,14 +185,6 @@ const Game = () => {
     const chatInputFocusRef = useRef(false);
     const chatMessagesRef = useRef(null);
     const [isMobileChatExpanded, setIsMobileChatExpanded] = useState(false);
-    // Panel de instrucciones móvil: visible al empezar, se auto-oculta a los 7s.
-    const [mobileHelpVisible, setMobileHelpVisible] = useState(true);
-    useEffect(() => {
-        if (!gameStarted) return undefined;
-        setMobileHelpVisible(true);
-        const id = setTimeout(() => setMobileHelpVisible(false), 7000);
-        return () => clearTimeout(id);
-    }, [gameStarted]);
 
     const { handleDirectionChange, resetMovement } = useControls({
         socketRef,
@@ -518,7 +510,7 @@ const Game = () => {
                 style={{
                     position: 'absolute',
                     top: '10px',
-                    right: isMobile ? '116px' : '96px',
+                    right: '96px',
                     zIndex: 1000,
                     width: '34px',
                     height: '34px',
@@ -782,132 +774,136 @@ const Game = () => {
                 isMobile ? (
                     // Layout móvil
                     <>
-                        {/* Columna superior izquierda: lista de jugadores + tu estado */}
+                        {/* Scoreboard y status */}
                         <div style={{
                             position: 'absolute',
                             top: '8px',
-                            left: '8px',
+                            left: '0',
+                            right: '0',
                             display: 'flex',
                             flexDirection: 'column',
-                            gap: '6px',
-                            maxWidth: '38%',
-                            zIndex: 40
+                            alignItems: 'center',
+                            gap: '8px',
+                            zIndex: 10
                         }}>
+
+                            {/* Lista de jugadores móvil */}
                             <div style={{
+                                position: 'absolute',
+                                top: '8px',
+                                left: '8px',
                                 backgroundColor: 'rgba(0, 0, 0, 0.6)',
-                                padding: '6px 8px',
+                                padding: '8px',
                                 borderRadius: '8px',
                                 fontSize: '10px',
-                                lineHeight: 1.3
+                                zIndex: 10
                             }}>
-                                <div style={{ color: '#3b82f6', marginBottom: '2px' }}>
+                                <div style={{
+                                    color: '#3b82f6',
+                                    marginBottom: '4px'
+                                }}>
                                     {teams.left.map(player => (
-                                        <div key={player.id} style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{player.name}</div>
+                                        <div key={player.id}>{player.name}</div>
                                     ))}
                                 </div>
-                                <div style={{ color: '#ef4444' }}>
+                                <div style={{
+                                    color: '#ef4444'
+                                }}>
                                     {teams.right.map(player => (
-                                        <div key={player.id} style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{player.name}</div>
+                                        <div key={player.id}>{player.name}</div>
                                     ))}
                                 </div>
                             </div>
 
+
+                            {/* Status de conexión, nombre y equipo */}
                             <div style={{
-                                backgroundColor: 'rgba(0, 0, 0, 0.6)',
-                                padding: '4px 8px',
-                                borderRadius: '6px',
-                                fontSize: '10px',
+                                position: 'absolute',
+                                right: '8px',
+                                top: '0',
                                 display: 'flex',
                                 alignItems: 'center',
-                                gap: '5px'
+                                gap: '6px',
+                                zIndex: 10
                             }}>
-                                <span style={{ color: isConnected ? '#22c55e' : '#ef4444' }}>{isConnected ? '●' : '○'}</span>
-                                <span style={{ color: 'white', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{playerName}</span>
-                                <span style={{ color: currentTeam === 'left' ? '#3b82f6' : '#ef4444', whiteSpace: 'nowrap' }}>
-                                    {currentTeam === 'left' ? t('teamSelection.mammals') : t('teamSelection.reptiles')}
+                                <div style={{
+                                    backgroundColor: isConnected ? 'rgba(39, 174, 96, 0.6)' : 'rgba(231, 76, 60, 0.6)',
+                                    padding: '4px 8px',
+                                    borderRadius: '4px',
+                                    color: 'white',
+                                    fontSize: '10px'
+                                }}>
+                                    {isConnected ? '●' : '○'}
+                                </div>
+                                <div style={{
+                                    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+                                    padding: '4px 8px',
+                                    borderRadius: '4px',
+                                    fontSize: '10px',
+                                    display: 'flex',
+                                    gap: '4px'
+                                }}>
+                                    <span style={{ color: 'white' }}>{playerName}</span>
+                                    <span style={{ color: currentTeam === 'left' ? '#3b82f6' : '#ef4444' }}>
+                                        {currentTeam === 'left' ? t('teamSelection.mammals') : t('teamSelection.reptiles')}
+                                    </span>
+                                </div>
+                            </div>
+
+                            {/* Marcador */}
+                            <div style={{
+                                backgroundColor: 'rgba(0, 0, 0, 0.6)',
+                                padding: '8px 16px',
+                                borderRadius: '8px',
+                                display: 'flex',
+                                gap: '16px',
+                                alignItems: 'center'
+                            }}>
+                                <span style={{ color: '#3b82f6', fontSize: '24px' }}>
+                                    {score.left}
+                                </span>
+                                <span style={{ color: 'white', fontSize: '24px' }}>-</span>
+                                <span style={{ color: '#ef4444', fontSize: '24px' }}>
+                                    {score.right}
                                 </span>
                             </div>
                         </div>
 
-                        {/* Marcador centrado (z-index alto para no quedar tras otros HUD) */}
+
+
+                        {/* Instrucciones móviles */}
                         <div style={{
                             position: 'absolute',
-                            top: '8px',
+                            top: '120px',
                             left: '50%',
                             transform: 'translateX(-50%)',
-                            backgroundColor: 'rgba(0, 0, 0, 0.65)',
-                            padding: '4px 14px',
-                            borderRadius: '10px',
-                            display: 'flex',
-                            gap: '12px',
-                            alignItems: 'center',
-                            fontWeight: 800,
-                            fontVariantNumeric: 'tabular-nums',
-                            lineHeight: 1,
-                            boxShadow: '0 2px 8px rgba(0,0,0,0.35)',
-                            zIndex: 70
+                            backgroundColor: 'rgba(0, 0, 0, 0.6)',
+                            padding: '8px 16px',
+                            borderRadius: '8px',
+                            color: 'white',
+                            fontSize: '12px',
+                            textAlign: 'center',
+                            zIndex: 10,
+                            opacity: 0.8,
+                            pointerEvents: 'none'
                         }}>
-                            <span style={{ color: '#3b82f6', fontSize: 'clamp(20px, 6vw, 28px)' }}>
-                                {score.left}
-                            </span>
-                            <span style={{ color: 'rgba(255,255,255,0.7)', fontSize: 'clamp(16px, 4.5vw, 22px)' }}>-</span>
-                            <span style={{ color: '#ef4444', fontSize: 'clamp(20px, 6vw, 28px)' }}>
-                                {score.right}
-                            </span>
+                            <h3 style={{ margin: '0 0 8px 0' }}>{t('gameUI.controls')}</h3>
+                            <p style={{ margin: '0 0 4px 0' }}>
+                                {isMobile
+                                    ? t('gameUI.mobileMovementInstructions')
+                                    : t('gameUI.moveInstructions')}
+                            </p>
+                            <p style={{ margin: '0 0 4px 0' }}>
+                                {isMobile
+                                    ? t('gameUI.mobileChatInstructions')
+                                    : t('gameUI.ballControlInstructions')}
+                            </p>
+                            <p style={{ margin: '0' }}>
+                                {isMobile
+                                    ? t('gameUI.mobileSprintInstructions')
+                                    : t('gameUI.sprintInstructions')}
+                            </p>
                         </div>
-
-                        {/* Instrucciones móviles: auto-ocultan a los 7s, con botón "?" para alternar */}
-                        {mobileHelpVisible ? (
-                            <div
-                                onClick={() => setMobileHelpVisible(false)}
-                                style={{
-                                    position: 'absolute',
-                                    top: '100px',
-                                    left: '50%',
-                                    transform: 'translateX(-50%)',
-                                    backgroundColor: 'rgba(0, 0, 0, 0.7)',
-                                    padding: '8px 14px',
-                                    borderRadius: '8px',
-                                    color: 'white',
-                                    fontSize: '11px',
-                                    textAlign: 'center',
-                                    maxWidth: '78%',
-                                    zIndex: 45,
-                                    cursor: 'pointer'
-                                }}
-                            >
-                                <p style={{ margin: '0 0 3px 0' }}>{t('gameUI.mobileMovementInstructions')}</p>
-                                <p style={{ margin: '0 0 3px 0' }}>{t('gameUI.mobileChatInstructions')}</p>
-                                <p style={{ margin: '0' }}>{t('gameUI.mobileSprintInstructions')}</p>
-                                <p style={{ margin: '4px 0 0 0', opacity: 0.6, fontSize: '9px' }}>{t('gameUI.tapToHide')}</p>
-                            </div>
-                        ) : (
-                            <button
-                                onClick={() => setMobileHelpVisible(true)}
-                                aria-label={t('gameUI.controls')}
-                                style={{
-                                    position: 'absolute',
-                                    top: '100px',
-                                    left: '50%',
-                                    transform: 'translateX(-50%)',
-                                    width: '28px',
-                                    height: '28px',
-                                    borderRadius: '50%',
-                                    border: '1px solid rgba(255,255,255,0.3)',
-                                    backgroundColor: 'rgba(0,0,0,0.5)',
-                                    color: 'white',
-                                    fontSize: '14px',
-                                    cursor: 'pointer',
-                                    zIndex: 45,
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    justifyContent: 'center',
-                                    padding: 0
-                                }}
-                            >
-                                ?
-                            </button>
-                        )}
 
                         {/* Joystick */}
                         {/* Mobile Controls - Joystick & Kick Button */}
@@ -925,10 +921,10 @@ const Game = () => {
                                 />
                         )}
 
-                        {/* Chat minimizable móvil - bajo el selector de idioma para no solaparlo */}
+                        {/* Chat minimizable móvil - movido a esquina superior derecha */}
                         <div style={{
                             position: 'fixed',
-                            top: '56px',
+                            top: isMobileChatExpanded ? '60px' : '10px',
                             right: '10px',
                             width: isMobileChatExpanded ? '85%' : '44px',
                             height: isMobileChatExpanded ? '200px' : '44px',
