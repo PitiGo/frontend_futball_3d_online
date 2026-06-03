@@ -120,6 +120,12 @@ export function playGoal() {
   noiseBurst({ dur: 0.4, gain: 0.07, filterFreq: 3000, type: 'highpass' });
 }
 
+/** Ball steal / tackle: short gritty thud. */
+export function playTackle() {
+  tone({ freq: 220, freqEnd: 60, type: 'sawtooth', dur: 0.12, gain: 0.14 });
+  noiseBurst({ dur: 0.14, gain: 0.12, filterFreq: 900, type: 'lowpass' });
+}
+
 /** Speed item pickup: bright ascending sparkle. */
 export function playItem() {
   tone({ freq: 880, freqEnd: 1320, type: 'triangle', dur: 0.12, gain: 0.16 });

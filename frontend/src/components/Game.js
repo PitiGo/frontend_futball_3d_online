@@ -12,7 +12,7 @@ import { useSearchParams } from 'react-router-dom';
 import { useControls } from '../hooks/useControls';
 import { useScene } from '../hooks/useScene';
 import { useGameSocket } from '../hooks/useGameSocket';
-import { initAudio, playGoal, playWhistle, playBounce, playItem, toggleMuted, isMuted } from '../services/sound';
+import { initAudio, playGoal, playWhistle, playBounce, playItem, playTackle, toggleMuted, isMuted } from '../services/sound';
 
 const MAX_CHAT_MESSAGES = 50;
 
@@ -328,6 +328,7 @@ const Game = () => {
         },
         onBallBounce: () => playBounce(),
         onItemCollected: () => playItem(),
+        onBallSteal: () => playTackle(),
         onChatUpdate: (message) => setChatMessages((prev) => [...prev.slice(-(MAX_CHAT_MESSAGES - 1)), message]),
         onPlayersListUpdate: (list) => {
             syncPlayerMeta(playerMetaRef, list);

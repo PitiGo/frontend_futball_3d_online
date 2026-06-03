@@ -88,6 +88,12 @@ const RESTITUTION = 0.6; // Coeficiente de restitución (elasticidad)
 const MAX_PLAYERS_PER_TEAM = 3;
 const GOALS_TO_WIN = 3;
 const BALL_CONTROL_RADIUS = 1.5;
+// --- Robo de balón / tackle ---
+const STEAL_GRACE_MS = 500;        // Tras ganar la posesión, no te la pueden robar (evita tira y afloja)
+const STEAL_VICTIM_LOCK_MS = 650;  // Tras perderla, la víctima no puede recuperarla de inmediato
+const STEAL_RADIUS_BONUS = 1.15;   // El alcance de robo es algo mayor que el radio de control
+const BOT_STEAL_CHANCE = 0.10;     // Probabilidad por tick de que un bot en rango robe a un rival
+const BOT_STEAL_COOLDOWN_MS = 800; // Separación mínima entre intentos de robo de un bot
 const BALL_RELEASE_MIN = 13; // Minimum shot speed (quick tap)
 const BALL_RELEASE_MAX = 22; // Maximum shot speed (full charge) — reducido para que ni a máxima carga cruce todo el campo
 const MAX_BALL_SPEED = 28; // Cap above release max; keeps shots readable
@@ -261,6 +267,8 @@ function resetPlayersPositions(roomId, state, kickoffTeam = null) {
     player.rotation.copyFromFloats(0, 0, 0, 1); // Mirando Z positivo
     player.isControllingBall = false;
     player.ballControlTime = 0;
+    player.controlProtectedUntil = 0;
+    player.controlLockUntil = 0;
     player.lastKickTime = 0;
     player.stamina = 0;
     player.boosted = false;
@@ -627,6 +635,9 @@ function createBot(state, team) {
     isBot: true,
     isControllingBall: false,
     ballControlTime: 0,
+    controlProtectedUntil: 0,
+    controlLockUntil: 0,
+    lastStealTime: 0,
     lastKickTime: 0,
     stamina: 0,
     boosted: false,
@@ -668,9 +679,9 @@ function removeAllBots(state) {
 // IA por tick: los bots conducen el balón hacia la portería rival con toques
 // cortos y solo disparan (con imprecisión) cuando están cerca del arco. Así el
 // balón no cruza el campo de una sola patada y los goles son más evitables.
-function updateBotAI(state) {
-  let controlledByHuman = false;
-  state.players.forEach((p) => { if (p.isControllingBall && !p.isBot) controlledByHuman = true; });
+function updateBotAI(roomId, state) {
+  const controller = getController(state);
+  const controlledByHuman = !!(controller && !controller.isBot);
 
   const ball = state.ballPosition;
   const now = performance.now();
@@ -695,6 +706,26 @@ function updateBotAI(state) {
     const ballInOwnHalf = Math.sign(ball.x) === ownHalfSign;
     if (dist > 6 && !ballInOwnHalf) {
       move.moveDirection.scaleInPlace(1 - BOT_DEFEND_BIAS);
+    }
+
+    // Robo/presión: si un RIVAL controla el balón y el bot está encima, intenta
+    // quitárselo (lo deja suelto a sus pies para luego conducir). Da interacción
+    // defensiva también frente a jugadores humanos.
+    if (controller && controller.team !== bot.team) {
+      const reach = (getCharacterStats(bot.characterType).controlRadius || BALL_CONTROL_RADIUS) * STEAL_RADIUS_BONUS;
+      if (dist <= reach
+        && now >= (controller.controlProtectedUntil || 0)
+        && now - (bot.lastStealTime || 0) >= BOT_STEAL_COOLDOWN_MS
+        && Math.random() < BOT_STEAL_CHANCE) {
+        controller.isControllingBall = false;
+        controller.controlLockUntil = now + STEAL_VICTIM_LOCK_MS;
+        bot.lastStealTime = now;
+        // Empujar el balón suelto hacia el bot para que lo recoja/conduzca.
+        const len = dist || 1;
+        state.ballVelocity.set((toBallX / len) * 4, 0, (toBallZ / len) * 4);
+        io.to(roomId).emit('ballSteal', { byId: bot.id, fromId: controller.id, x: round2(ball.x), z: round2(ball.z) });
+      }
+      return; // mientras un rival controla, el bot presiona pero no "golpea".
     }
 
     // Tocar el balón solo si está al alcance y no lo controla un humano.
@@ -778,6 +809,88 @@ function updateItems(roomId, state, now) {
   });
 }
 
+// Devuelve el jugador que controla el balón ahora mismo (o null).
+function getController(state) {
+  let controller = null;
+  state.players.forEach((p) => { if (p.isControllingBall) controller = p; });
+  return controller;
+}
+
+// Otorga el control del balón a un jugador, limpiando cualquier otro control y
+// dándole una breve protección anti-robo para evitar el "tira y afloja".
+function grantControl(state, player) {
+  const now = performance.now();
+  state.players.forEach((p) => { p.isControllingBall = false; });
+  player.isControllingBall = true;
+  player.ballControlTime = now;
+  player.controlProtectedUntil = now + STEAL_GRACE_MS;
+  state.ballVelocity.set(0, 0, 0);
+}
+
+// Robo limpio: si un rival controla el balón y el ladrón está en rango (y la
+// posesión ya no está protegida), el ladrón se lleva el balón. Devuelve true si
+// tuvo éxito. Solo se roba a rivales, nunca a compañeros.
+function tryStealBall(roomId, state, stealer) {
+  const controller = getController(state);
+  if (!controller || controller.id === stealer.id) return false;
+  if (controller.team === stealer.team) return false;
+
+  const now = performance.now();
+  if (now < (controller.controlProtectedUntil || 0)) return false;
+
+  const stats = getCharacterStats(stealer.characterType);
+  const reach = (stats.controlRadius || BALL_CONTROL_RADIUS) * STEAL_RADIUS_BONUS;
+  const dx = state.ballPosition.x - stealer.position.x;
+  const dz = state.ballPosition.z - stealer.position.z;
+  if (dx * dx + dz * dz > reach * reach) return false;
+
+  controller.isControllingBall = false;
+  controller.controlLockUntil = now + STEAL_VICTIM_LOCK_MS;
+  grantControl(state, stealer);
+  io.to(roomId).emit('ballSteal', { byId: stealer.id, fromId: controller.id, x: round2(state.ballPosition.x), z: round2(state.ballPosition.z) });
+  log(`[${roomId}] ${stealer.name} ROBA el balón a ${controller.name}.`);
+  return true;
+}
+
+// Separa a jugadores que se solapan (empuje posicional suave, sin transferir
+// velocidad) para permitir forcejeos/blocajes sin que se atraviesen. O(n^2) con
+// n pequeño (<= 6 por sala).
+function resolvePlayerCollisions(state) {
+  const arr = [];
+  state.players.forEach((p) => { if (p.team) arr.push(p); });
+  for (let i = 0; i < arr.length; i += 1) {
+    for (let j = i + 1; j < arr.length; j += 1) {
+      const a = arr[i];
+      const b = arr[j];
+      const dx = b.position.x - a.position.x;
+      const dz = b.position.z - a.position.z;
+      const ra = getCharacterStats(a.characterType).radius || PLAYER_RADIUS;
+      const rb = getCharacterStats(b.characterType).radius || PLAYER_RADIUS;
+      const minD = ra + rb;
+      let dSq = dx * dx + dz * dz;
+      if (dSq === 0) {
+        // Solape exacto: separar con un empujón mínimo determinista.
+        a.position.x -= 0.05; b.position.x += 0.05;
+        dSq = 0.01;
+        continue;
+      }
+      if (dSq < minD * minD) {
+        const d = Math.sqrt(dSq);
+        const push = (minD - d) * 0.5;
+        const nx = dx / d;
+        const nz = dz / d;
+        a.position.x -= nx * push; a.position.z -= nz * push;
+        b.position.x += nx * push; b.position.z += nz * push;
+      }
+    }
+  }
+  arr.forEach((p) => {
+    const r = getCharacterStats(p.characterType).radius || PLAYER_RADIUS;
+    p.position.x = Math.max(-FIELD_WIDTH / 2 + r, Math.min(FIELD_WIDTH / 2 - r, p.position.x));
+    p.position.z = Math.max(-FIELD_HEIGHT / 2 + r, Math.min(FIELD_HEIGHT / 2 - r, p.position.z));
+  });
+}
+
 // --- Bucle Principal de Física y Lógica ---
 function updateGamePhysics(roomId, state) {
   const now = performance.now();
@@ -800,7 +913,7 @@ function updateGamePhysics(roomId, state) {
       return;
     }
     // IA de bots: decide movimiento/golpeo antes de integrar la física.
-    updateBotAI(state);
+    updateBotAI(roomId, state);
   }
 
   // 1. Actualizar Jugadores
@@ -864,6 +977,9 @@ function updateGamePhysics(roomId, state) {
       Quaternion.FromEulerAnglesToRef(0, angle, 0, player.rotation);
     }
   });
+
+  // Forcejeo: separar jugadores solapados (permite blocar/empujar sin atravesarse).
+  resolvePlayerCollisions(state);
 
   // Ítems de velocidad: spawn periódico y recogida (posiciones ya actualizadas).
   updateItems(roomId, state, now);
@@ -1221,6 +1337,8 @@ io.on('connection', (socket) => {
       ready: false,
       isControllingBall: false,
       ballControlTime: 0,
+      controlProtectedUntil: 0, // Protección anti-robo tras ganar la posesión
+      controlLockUntil: 0,      // Bloqueo de recuperación tras sufrir un robo
       lastKickTime: 0, // To avoid immediate collision after shot
       stamina: 0,             // Combustible del boost (0..STAMINA_MAX); se recarga con ítems
       boosted: false,         // Boost de velocidad activo (tras recoger un ítem)
@@ -1466,22 +1584,28 @@ io.on('connection', (socket) => {
     //log(`[${currentRoomId}] -> ballControl de ${player.name}. Control: ${control}`);
 
     if (control === true) {
-      const stats = getCharacterStats(player.characterType);
-      const controlRadius = stats.controlRadius || BALL_CONTROL_RADIUS;
-      const toBall = state.ballPosition.subtract(player.position);
-      toBall.y = 0;
-      const distSq = toBall.lengthSquared();
-      const controlRadiusSq = controlRadius * controlRadius;
-      let alreadyControlled = false;
-      state.players.forEach(p => { if (p.isControllingBall) alreadyControlled = true; });
+      const now = performance.now();
+      // Tras perder el balón en un robo, la víctima no puede recuperarlo al instante.
+      if (now < (player.controlLockUntil || 0)) return;
 
-      if (!alreadyControlled && distSq < controlRadiusSq) {
-        player.isControllingBall = true;
-        player.ballControlTime = performance.now();
-        state.ballVelocity.set(0, 0, 0); // Detener balón
-        log(`[${currentRoomId}] ${player.name} INICIA control de balón.`);
-      } else {
-        //log(`[${currentRoomId}] ${player.name} FALLA control.`);
+      const controller = getController(state);
+
+      if (controller && controller.id !== player.id) {
+        // Hay un poseedor distinto: si es rival, intentar robárselo (con espacio).
+        if (controller.team !== player.team) {
+          tryStealBall(currentRoomId, state, player);
+        }
+        // Si es compañero, no se hace nada.
+      } else if (!controller) {
+        // Balón suelto: tomar control si está dentro del radio.
+        const stats = getCharacterStats(player.characterType);
+        const controlRadius = stats.controlRadius || BALL_CONTROL_RADIUS;
+        const toBall = state.ballPosition.subtract(player.position);
+        toBall.y = 0;
+        if (toBall.lengthSquared() < controlRadius * controlRadius) {
+          grantControl(state, player);
+          log(`[${currentRoomId}] ${player.name} INICIA control de balón.`);
+        }
       }
     } else if (control === false) {
       // Soltar el balón (disparo)

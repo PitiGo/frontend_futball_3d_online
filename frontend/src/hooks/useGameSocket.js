@@ -87,6 +87,7 @@ export function useGameSocket({
     const handlePlayersListUpdate = (data) => cb().onPlayersListUpdate?.(data);
     const handleBallBounce = (data) => cb().onBallBounce?.(data);
     const handleItemCollected = (data) => cb().onItemCollected?.(data);
+    const handleBallSteal = (data) => cb().onBallSteal?.(data);
     const handleJoinError = ({ message }) => cb().onError?.(message);
     const handleSelectTeamError = ({ message }) => cb().onError?.(message);
     const handleSelectCharacterError = ({ message }) => cb().onError?.(message);
@@ -109,6 +110,7 @@ export function useGameSocket({
     socket.on('playersListUpdate', handlePlayersListUpdate);
     socket.on('ballBounce', handleBallBounce);
     socket.on('itemCollected', handleItemCollected);
+    socket.on('ballSteal', handleBallSteal);
     socket.on('joinError', handleJoinError);
     socket.on('selectTeamError', handleSelectTeamError);
     socket.on('selectCharacterError', handleSelectCharacterError);
@@ -166,6 +168,7 @@ export function useGameSocket({
       socket.off('playersListUpdate', handlePlayersListUpdate);
       socket.off('ballBounce', handleBallBounce);
       socket.off('itemCollected', handleItemCollected);
+      socket.off('ballSteal', handleBallSteal);
       socket.off('joinError');
       socket.off('selectTeamError');
       socket.off('selectCharacterError');
