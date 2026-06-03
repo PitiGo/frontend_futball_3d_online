@@ -437,7 +437,38 @@ export function createGameScene(canvas, { refs, isMobileRef, onSceneReady, onLoa
             refs.scoreTextRef.current = createScoreDisplay(advancedTexture);
         }
 
+        // Interpolación de red a 60 fps: el estado llega a 20 Hz, así que entre
+        // paquetes suavizamos hacia la última posición del servidor (netTarget).
+        // Esto elimina los "saltos" al moverse rápido (boost). Saltos grandes
+        // (goles/reinicios) se teletransportan.
+        const NET_SMOOTH_K = 16;   // mayor = sigue al objetivo más rápido (menos lag)
+        const NET_SNAP_DIST = 6;   // distancia a partir de la cual se teletransporta
+        const NET_SNAP_DIST_SQ = NET_SNAP_DIST * NET_SNAP_DIST;
+        const interpolateNet = (mesh, smooth) => {
+            const tgt = mesh && mesh.netTarget;
+            if (!tgt) return;
+            const dx = tgt.x - mesh.position.x;
+            const dz = tgt.z - mesh.position.z;
+            if (dx * dx + dz * dz > NET_SNAP_DIST_SQ) {
+                mesh.position.x = tgt.x;
+                mesh.position.z = tgt.z;
+            } else {
+                mesh.position.x += dx * smooth;
+                mesh.position.z += dz * smooth;
+            }
+            mesh.position.y = tgt.y;
+        };
+
         refs.sceneRef.current.registerBeforeRender(() => {
+            // Suavizado de posiciones (jugadores + balón) hacia el último estado.
+            const netDt = Math.max(1, scene.getEngine().getDeltaTime()) / 1000;
+            const smooth = 1 - Math.exp(-NET_SMOOTH_K * netDt);
+            const players = refs.playersRef.current;
+            if (players) {
+                for (const id in players) interpolateNet(players[id], smooth);
+            }
+            if (refs.ballRef.current) interpolateNet(refs.ballRef.current, smooth);
+
             // Giro continuo de los ítems de velocidad (efecto power-up).
             const items = refs.itemsRef.current;
             if (items) {

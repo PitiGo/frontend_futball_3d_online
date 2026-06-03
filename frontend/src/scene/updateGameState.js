@@ -3,23 +3,11 @@ import * as GUI from '@babylonjs/gui';
 import { getPlayerVisualY } from '../constants/characterStats';
 import { playKick } from '../services/sound';
 
-const SNAP_DISTANCE = 3;
-// Kick separation + first network tick can jump ~3.2 units; keep above that so
-// the ball lerps instead of snapping on shot.
-const BALL_SNAP_DISTANCE = 6;
-const LERP_ALPHA = 0.15;
-
 // Stamina bar colors by remaining fraction.
 function staminaColor(fraction) {
   if (fraction > 0.5) return 'linear-gradient(90deg, #22c55e, #86efac)';
   if (fraction > 0.2) return 'linear-gradient(90deg, #f59e0b, #fcd34d)';
   return 'linear-gradient(90deg, #ef4444, #fca5a5)';
-}
-
-function lerpToward(current, target, snapDistance = SNAP_DISTANCE) {
-  const dist = BABYLON.Vector3.Distance(current, target);
-  const alpha = dist > snapDistance ? 1.0 : LERP_ALPHA;
-  return BABYLON.Vector3.Lerp(current, target, alpha);
 }
 
 export function createUpdateGameState(refs) {
@@ -189,7 +177,13 @@ export function createUpdateGameState(refs) {
             playerData.position.z,
           );
 
-          playerInstance.position = lerpToward(currentPosition, targetPosition);
+          // No movemos la malla aquí (20 Hz). Guardamos el objetivo del servidor y
+          // el bucle de render interpola hacia él a 60 fps (movimiento fluido, sin
+          // saltos al ir con boost). Primer paquete: posicionar de golpe.
+          if (!playerInstance.netTarget) {
+            playerInstance.position.set(targetPosition.x, visualY, targetPosition.z);
+          }
+          playerInstance.netTarget = { x: targetPosition.x, y: visualY, z: targetPosition.z };
 
           const deltaX = targetPosition.x - currentPosition.x;
           const deltaZ = targetPosition.z - currentPosition.z;
@@ -263,7 +257,11 @@ export function createUpdateGameState(refs) {
       if (speed > 0.01) {
         ballRef.current.rotate(rotationAxis, speed * 8, BABYLON.Space.WORLD);
       }
-      ballRef.current.position = lerpToward(currentPosition, targetPosition, BALL_SNAP_DISTANCE);
+      // Igual que los jugadores: guardamos objetivo y el render interpola a 60 fps.
+      if (!ballRef.current.netTarget) {
+        ballRef.current.position.set(targetPosition.x, targetPosition.y, targetPosition.z);
+      }
+      ballRef.current.netTarget = { x: targetPosition.x, y: targetPosition.y, z: targetPosition.z };
     }
 
     // Ítems de velocidad: crear/posicionar/eliminar según el estado autoritativo.
