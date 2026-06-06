@@ -1,0 +1,17 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  # Servidor de juego (Socket.IO + Express). Expone /metrics con prom-client.
+  - job_name: 'game-server'
+    metrics_path: /metrics
+    static_configs:
+      - targets: ['game-server:4000']
+        labels:
+          service: 'football-game-server'
+
+  # Auto-monitorización de Prometheus.
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']

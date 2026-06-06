@@ -19,6 +19,7 @@ import {
   GOAL_NET_DEPTH,
   BALL_RADIUS,
 } from './physics/collisions.js';
+import * as metrics from './metrics.js';
 
 const app = express();
 
@@ -184,6 +185,28 @@ availableSalas.forEach(roomId => {
   };
 });
 
+
+// --- Métricas Prometheus ---
+// Snapshot del estado actual para los gauges (se consulta en cada scrape).
+metrics.setSnapshotProvider(() => {
+  const rooms = Object.values(salaStates).map((state) => {
+    let humans = 0;
+    let bots = 0;
+    state.players.forEach((p) => { if (p.isBot) bots += 1; else humans += 1; });
+    return {
+      room: state.roomId,
+      humans,
+      bots,
+      players: state.players.size,
+      state: state.currentGameState,
+      active: state.currentGameState === gameStates.PLAYING,
+    };
+  });
+  return { sockets: io.engine?.clientsCount || 0, rooms };
+});
+
+// Endpoint scrapeado por Prometheus.
+app.get('/metrics', metrics.handler);
 
 // --- Rutas API (Ej: Status) ---
 app.get('/:roomId/status', (req, res) => {
@@ -371,6 +394,7 @@ function checkStartGame(roomId, state) {
 
 function startGame(roomId, state) {
   state.currentGameState = gameStates.PLAYING;
+  metrics.matchesStartedTotal.inc({ room: roomId });
   state.score = { left: 0, right: 0 };
   state.gameOverData = null; // Limpiar datos de juego anterior
   state.matchTimeLeftMs = MATCH_DURATION_MS; // Reiniciar reloj de partido
@@ -421,6 +445,7 @@ function stopGame(roomId, state, reason, finalScore, winningTeam) {
   }
 
   state.currentGameState = gameStates.GAME_OVER;
+  metrics.matchesFinishedTotal.inc({ room: roomId, result: winningTeam || 'draw' });
   const scorers = Array.from(state.scorers.values())
     .filter((s) => s.goals > 0)
     .sort((a, b) => b.goals - a.goals);
@@ -542,6 +567,7 @@ function handleGoal(roomId, state, scoringTeam) {
     state.score.right++;
     log(`[${roomId}] Gol para equipo DERECHO. Score: ${state.score.left}-${state.score.right}`);
   }
+  metrics.goalsTotal.inc({ room: roomId, team: scoringTeam });
 
   // Atribución del gol al último jugador que impulsó el balón.
   let scorerName = null;
@@ -557,6 +583,7 @@ function handleGoal(roomId, state, scoringTeam) {
       // El balón entró en su propia portería: autogol (no se acredita).
       ownGoal = true;
       scorerName = shooterName;
+      metrics.ownGoalsTotal.inc({ room: roomId, team: shooter.team });
     }
   }
 
@@ -728,6 +755,7 @@ function updateBotAI(roomId, state) {
         const len = dist || 1;
         state.ballVelocity.set((toBallX / len) * 4, 0, (toBallZ / len) * 4);
         io.to(roomId).emit('ballSteal', { byId: bot.id, fromId: controller.id, x: round2(ball.x), z: round2(ball.z) });
+        metrics.ballStealsTotal.inc({ room: roomId, by: 'bot' });
       }
       return; // mientras un rival controla, el bot presiona pero no "golpea".
     }
@@ -808,6 +836,7 @@ function updateItems(roomId, state, now) {
         player.stamina = STAMINA_MAX;
         player.boosted = true;
         io.to(roomId).emit('itemCollected', { playerId: player.id, x: item.x, z: item.z });
+        metrics.itemsCollectedTotal.inc({ room: roomId });
       }
     }
   });
@@ -852,6 +881,7 @@ function tryStealBall(roomId, state, stealer) {
   controller.controlLockUntil = now + STEAL_VICTIM_LOCK_MS;
   grantControl(state, stealer);
   io.to(roomId).emit('ballSteal', { byId: stealer.id, fromId: controller.id, x: round2(state.ballPosition.x), z: round2(state.ballPosition.z) });
+  metrics.ballStealsTotal.inc({ room: roomId, by: stealer.isBot ? 'bot' : 'human' });
   log(`[${roomId}] ${stealer.name} ROBA el balón a ${controller.name}.`);
   return true;
 }
@@ -1285,6 +1315,7 @@ function emitGameState(roomId, state) {
 // --- Manejadores de Eventos de Socket.IO ---
 io.on('connection', (socket) => {
   log(`++ Cliente conectado: ${socket.id}`);
+  metrics.playerConnectionsTotal.inc();
   let currentRoomId = null; // ID de la sala para este socket
   // Medición de latencia: el cliente envía su timestamp y lo devolvemos tal cual.
   socket.on('pingCheck', (clientTime) => {
@@ -1365,6 +1396,7 @@ io.on('connection', (socket) => {
     };
     state.players.set(socket.id, playerData);
     state.playerMovements.set(socket.id, { moveDirection: Vector3.Zero() });
+    metrics.playerJoinsTotal.inc({ room: roomId });
 
     log(`[${roomId}] Jugador ${sanitizedName} (${socket.id}) añadido y unido.`);
 
@@ -1720,6 +1752,7 @@ io.on('connection', (socket) => {
   // Handler 'disconnect'
   socket.on('disconnect', (reason) => {
     log(`-- Cliente desconectado: ${socket.id}. Sala: ${currentRoomId || 'N/A'}. Razón: ${reason}`);
+    metrics.playerDisconnectionsTotal.inc();
     if (!currentRoomId) return; // Si nunca se unió a una sala
 
     const state = salaStates[currentRoomId];

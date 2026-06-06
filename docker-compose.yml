@@ -18,6 +18,41 @@ services:
     networks:
       - game-network
 
+  prometheus:
+    image: prom/prometheus:latest
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.retention.time=30d'
+    ports:
+      - "9090:9090"
+    networks:
+      - game-network
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:latest
+    depends_on:
+      - prometheus
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - grafana-data:/var/lib/grafana
+    environment:
+      # Cambia la contraseña por una segura (o usa un secreto) en producción.
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_USER:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin}
+    ports:
+      - "3001:3000"
+    networks:
+      - game-network
+    restart: unless-stopped
+
 networks:
   game-network:
     driver: bridge
+
+volumes:
+  prometheus-data:
+  grafana-data:

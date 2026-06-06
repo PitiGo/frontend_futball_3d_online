@@ -1,0 +1,114 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "graphTooltip": 0,
+  "title": "Football 3D — Overview",
+  "uid": "football-3d-overview",
+  "tags": ["football", "game-server"],
+  "timezone": "",
+  "schemaVersion": 39,
+  "version": 1,
+  "time": { "from": "now-6h", "to": "now" },
+  "refresh": "15s",
+  "templating": { "list": [] },
+  "panels": [
+    {
+      "type": "stat",
+      "title": "Sockets conectados",
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "color": { "mode": "thresholds" } } },
+      "targets": [
+        { "expr": "football_connected_sockets", "legendFormat": "sockets", "refId": "A" }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Partidas activas",
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "expr": "football_active_matches", "legendFormat": "activas", "refId": "A" }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Jugadores totales (humanos)",
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "expr": "sum(football_humans_in_room)", "legendFormat": "humanos", "refId": "A" }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Bots totales",
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "expr": "sum(football_bots_in_room)", "legendFormat": "bots", "refId": "A" }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Jugadores por sala (humanos + bots)",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "expr": "football_players_in_room", "legendFormat": "{{room}} total", "refId": "A" },
+        { "expr": "football_humans_in_room", "legendFormat": "{{room}} humanos", "refId": "B" },
+        { "expr": "football_bots_in_room", "legendFormat": "{{room}} bots", "refId": "C" }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Goles por minuto (por equipo)",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "expr": "sum by (team) (rate(football_goals_total[5m])) * 60", "legendFormat": "{{team}}", "refId": "A" }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Partidas iniciadas / finalizadas (por minuto)",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "expr": "sum(rate(football_matches_started_total[10m])) * 60", "legendFormat": "iniciadas", "refId": "A" },
+        { "expr": "sum by (result) (rate(football_matches_finished_total[10m])) * 60", "legendFormat": "fin: {{result}}", "refId": "B" }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Interacciones: robos e ítems (por minuto)",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 12 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "expr": "sum by (by) (rate(football_ball_steals_total[5m])) * 60", "legendFormat": "robos: {{by}}", "refId": "A" },
+        { "expr": "sum(rate(football_items_collected_total[5m])) * 60", "legendFormat": "ítems", "refId": "B" }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Conexiones / desconexiones (por minuto)",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 20 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "expr": "rate(football_player_connections_total[5m]) * 60", "legendFormat": "conexiones", "refId": "A" },
+        { "expr": "rate(football_player_disconnections_total[5m]) * 60", "legendFormat": "desconexiones", "refId": "B" },
+        { "expr": "sum(rate(football_player_joins_total[5m])) * 60", "legendFormat": "joins a sala", "refId": "C" }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Memoria heap del proceso (bytes)",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 20 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "expr": "football_process_resident_memory_bytes", "legendFormat": "RSS", "refId": "A" },
+        { "expr": "football_nodejs_heap_size_used_bytes", "legendFormat": "heap usado", "refId": "B" }
+      ]
+    }
+  ]
+}
