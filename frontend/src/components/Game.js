@@ -12,7 +12,7 @@ import { useSearchParams } from 'react-router-dom';
 import { useControls } from '../hooks/useControls';
 import { useScene } from '../hooks/useScene';
 import { useGameSocket } from '../hooks/useGameSocket';
-import { initAudio, playGoal, playCrowdCheer, playWhistle, playBounce, playItem, playTackle, toggleMuted, isMuted } from '../services/sound';
+import { initAudio, playGoal, playCrowdCheer, playWhistle, playBounce, playItem, playTackle, playMissileLaunch, playExplosion, toggleMuted, isMuted } from '../services/sound';
 
 const MAX_CHAT_MESSAGES = 50;
 
@@ -74,6 +74,8 @@ const Game = () => {
     const chargeFillRef = useRef(null);
     const chargeContainerRef = useRef(null);
     const fxRef = useRef(null); // Efectos de escena: sacudida de cámara, ráfagas de partículas
+    const missilesRef = useRef({}); // Mallas de misiles teledirigidos en vuelo
+    const missileIndicatorRef = useRef(null); // Badge 🚀 cuando llevas un misil armado
 
     const [showingEndMessage, setShowingEndMessage] = useState(false);
 
@@ -176,6 +178,8 @@ const Game = () => {
     const [chatExpanded, setChatExpanded] = useState(true);
     const [toast, setToast] = useState({ message: null, type: 'error' });
     const [kickoffEndsAt, setKickoffEndsAt] = useState(null);
+    // Ayuda móvil: visible solo unos segundos al empezar, para despejar la pantalla.
+    const [showMobileHelp, setShowMobileHelp] = useState(true);
 
     const sceneReadyRef = useRef(false);
     const isMobileRef = useRef(false);
@@ -225,6 +229,8 @@ const Game = () => {
         chargeFillRef,
         chargeContainerRef,
         fxRef,
+        missilesRef,
+        missileIndicatorRef,
     }), [setConnectedPlayers]);
 
     const onSceneReady = useCallback(() => setSceneReady(true), []);
@@ -332,8 +338,27 @@ const Game = () => {
             }
         },
         onBallBounce: () => playBounce(),
-        onItemCollected: () => playItem(),
+        onItemCollected: ({ type, playerId } = {}) => {
+            playItem();
+            if (type === 'missile' && playerId === socketRef.current?.id) {
+                setToast({ message: t('gameUI.missileReady'), type: 'info' });
+            }
+        },
         onBallSteal: () => playTackle(),
+        onMissileLaunched: ({ targetId, targetName } = {}) => {
+            playMissileLaunch();
+            const isMe = targetId === socketRef.current?.id;
+            setToast({
+                message: isMe ? t('gameUI.missileIncoming') : `${t('gameUI.missileAt')} ${targetName}`,
+                type: isMe ? 'error' : 'info',
+            });
+        },
+        onMissileHit: ({ x, z } = {}) => {
+            playExplosion();
+            if (typeof x === 'number' && typeof z === 'number') {
+                fxRef.current?.explosionBurst?.({ x, y: 1, z });
+            }
+        },
         onChatUpdate: (message) => setChatMessages((prev) => [...prev.slice(-(MAX_CHAT_MESSAGES - 1)), message]),
         onPlayersListUpdate: (list) => {
             syncPlayerMeta(playerMetaRef, list);
@@ -424,6 +449,13 @@ const Game = () => {
     }, [roomId, setSearchParams, availableRooms, roomPrefix]);
 
     useEffect(() => {
+        if (!gameStarted || !isMobile) return undefined;
+        setShowMobileHelp(true);
+        const timer = setTimeout(() => setShowMobileHelp(false), 8000);
+        return () => clearTimeout(timer);
+    }, [gameStarted, isMobile]);
+
+    useEffect(() => {
         const checkMobile = () => {
             setIsMobile(window.innerWidth <= 768);
         };
@@ -504,8 +536,8 @@ const Game = () => {
             />
 
 
-            {/* Agregar el selector de idioma aquí */}
-            <LanguageSelector />
+            {/* Selector de idioma: oculto en móvil durante el partido (despeja la esquina) */}
+            {!(isMobile && gameStarted) && <LanguageSelector />}
 
             {/* Botón de silencio (sonido del juego) */}
             <button
@@ -515,7 +547,7 @@ const Game = () => {
                 style={{
                     position: 'absolute',
                     top: '10px',
-                    right: '96px',
+                    right: isMobile && gameStarted ? '64px' : '96px',
                     zIndex: 1000,
                     width: '34px',
                     height: '34px',
@@ -646,10 +678,11 @@ const Game = () => {
                     ref={chargeContainerRef}
                     style={{
                         position: 'absolute',
-                        bottom: isMobile ? '42px' : '54px',
-                        left: '50%',
-                        transform: 'translateX(-50%)',
-                        width: isMobile ? '150px' : '220px',
+                        // Móvil: columna a la izquierda, sobre el joystick (no tapa el centro).
+                        bottom: isMobile ? '224px' : '54px',
+                        left: isMobile ? '30px' : '50%',
+                        transform: isMobile ? 'none' : 'translateX(-50%)',
+                        width: isMobile ? '140px' : '220px',
                         zIndex: 50,
                         pointerEvents: 'none',
                         display: 'none'
@@ -691,10 +724,10 @@ const Game = () => {
                     ref={staminaContainerRef}
                     style={{
                         position: 'absolute',
-                        bottom: isMobile ? '14px' : '22px',
-                        left: '50%',
-                        transform: 'translateX(-50%)',
-                        width: isMobile ? '150px' : '220px',
+                        bottom: isMobile ? '190px' : '22px',
+                        left: isMobile ? '30px' : '50%',
+                        transform: isMobile ? 'none' : 'translateX(-50%)',
+                        width: isMobile ? '140px' : '220px',
                         zIndex: 50,
                         pointerEvents: 'none',
                         display: 'none'
@@ -727,6 +760,34 @@ const Game = () => {
                             }}
                         />
                     </div>
+                </div>
+            )}
+
+            {/* Badge de misil armado — visible mientras llevas el power-up (vía ref) */}
+            {gameStarted && teamSelected && (
+                <div
+                    ref={missileIndicatorRef}
+                    style={{
+                        position: 'absolute',
+                        // Móvil: sobre el botón KICK; desktop: a la derecha de la barra de stamina.
+                        bottom: isMobile ? '135px' : '18px',
+                        right: isMobile ? '30px' : 'auto',
+                        left: isMobile ? 'auto' : 'calc(50% + 125px)',
+                        width: '38px',
+                        height: '38px',
+                        borderRadius: '50%',
+                        backgroundColor: 'rgba(0, 0, 0, 0.65)',
+                        border: '2px solid rgba(255, 140, 50, 0.9)',
+                        boxShadow: '0 0 12px rgba(255, 120, 30, 0.7)',
+                        fontSize: '20px',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        zIndex: 55,
+                        pointerEvents: 'none',
+                        display: 'none'
+                    }}
+                >
+                    🚀
                 </div>
             )}
 
@@ -821,40 +882,6 @@ const Game = () => {
                             </div>
 
 
-                            {/* Status de conexión, nombre y equipo */}
-                            <div style={{
-                                position: 'absolute',
-                                right: '8px',
-                                top: '0',
-                                display: 'flex',
-                                alignItems: 'center',
-                                gap: '6px',
-                                zIndex: 10
-                            }}>
-                                <div style={{
-                                    backgroundColor: isConnected ? 'rgba(39, 174, 96, 0.6)' : 'rgba(231, 76, 60, 0.6)',
-                                    padding: '4px 8px',
-                                    borderRadius: '4px',
-                                    color: 'white',
-                                    fontSize: '10px'
-                                }}>
-                                    {isConnected ? '●' : '○'}
-                                </div>
-                                <div style={{
-                                    backgroundColor: 'rgba(0, 0, 0, 0.6)',
-                                    padding: '4px 8px',
-                                    borderRadius: '4px',
-                                    fontSize: '10px',
-                                    display: 'flex',
-                                    gap: '4px'
-                                }}>
-                                    <span style={{ color: 'white' }}>{playerName}</span>
-                                    <span style={{ color: currentTeam === 'left' ? '#3b82f6' : '#ef4444' }}>
-                                        {currentTeam === 'left' ? t('teamSelection.mammals') : t('teamSelection.reptiles')}
-                                    </span>
-                                </div>
-                            </div>
-
                             {/* Marcador */}
                             <div style={{
                                 backgroundColor: 'rgba(0, 0, 0, 0.6)',
@@ -876,39 +903,30 @@ const Game = () => {
 
 
 
-                        {/* Instrucciones móviles */}
-                        <div style={{
-                            position: 'absolute',
-                            top: '120px',
-                            left: '50%',
-                            transform: 'translateX(-50%)',
-                            backgroundColor: 'rgba(0, 0, 0, 0.6)',
-                            padding: '8px 16px',
-                            borderRadius: '8px',
-                            color: 'white',
-                            fontSize: '12px',
-                            textAlign: 'center',
-                            zIndex: 10,
-                            opacity: 0.8,
-                            pointerEvents: 'none'
-                        }}>
-                            <h3 style={{ margin: '0 0 8px 0' }}>{t('gameUI.controls')}</h3>
-                            <p style={{ margin: '0 0 4px 0' }}>
-                                {isMobile
-                                    ? t('gameUI.mobileMovementInstructions')
-                                    : t('gameUI.moveInstructions')}
-                            </p>
-                            <p style={{ margin: '0 0 4px 0' }}>
-                                {isMobile
-                                    ? t('gameUI.mobileChatInstructions')
-                                    : t('gameUI.ballControlInstructions')}
-                            </p>
-                            <p style={{ margin: '0' }}>
-                                {isMobile
-                                    ? t('gameUI.mobileSprintInstructions')
-                                    : t('gameUI.sprintInstructions')}
-                            </p>
-                        </div>
+                        {/* Instrucciones móviles: se ocultan solas a los pocos segundos */}
+                        {showMobileHelp && (
+                            <div style={{
+                                position: 'absolute',
+                                top: '120px',
+                                left: '50%',
+                                transform: 'translateX(-50%)',
+                                backgroundColor: 'rgba(0, 0, 0, 0.6)',
+                                padding: '8px 16px',
+                                borderRadius: '8px',
+                                color: 'white',
+                                fontSize: '12px',
+                                textAlign: 'center',
+                                zIndex: 10,
+                                opacity: 0.8,
+                                pointerEvents: 'none',
+                                maxWidth: '85vw'
+                            }}>
+                                <h3 style={{ margin: '0 0 8px 0' }}>{t('gameUI.controls')}</h3>
+                                <p style={{ margin: '0 0 4px 0' }}>{t('gameUI.mobileMovementInstructions')}</p>
+                                <p style={{ margin: '0 0 4px 0' }}>{t('gameUI.mobileChatInstructions')}</p>
+                                <p style={{ margin: '0' }}>{t('gameUI.mobileSprintInstructions')}</p>
+                            </div>
+                        )}
 
                         {/* Joystick */}
                         {/* Mobile Controls - Joystick & Kick Button */}

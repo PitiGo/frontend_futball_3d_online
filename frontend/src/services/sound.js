@@ -171,6 +171,19 @@ export function playCrowdCheer() {
   src.stop(t0 + dur);
 }
 
+/** Homing missile launch: rising whoosh. */
+export function playMissileLaunch() {
+  tone({ freq: 180, freqEnd: 950, type: 'sawtooth', dur: 0.4, gain: 0.1 });
+  noiseBurst({ dur: 0.35, gain: 0.08, filterFreq: 2500, type: 'highpass' });
+}
+
+/** Missile impact: low boom + debris. */
+export function playExplosion() {
+  tone({ freq: 130, freqEnd: 35, type: 'sine', dur: 0.45, gain: 0.3 });
+  noiseBurst({ dur: 0.4, gain: 0.28, filterFreq: 500, type: 'lowpass' });
+  noiseBurst({ dur: 0.18, gain: 0.1, filterFreq: 2200, type: 'highpass' });
+}
+
 /** Short tick for the kickoff countdown digits. */
 export function playCountdownTick() {
   tone({ freq: 880, type: 'square', dur: 0.07, gain: 0.08 });

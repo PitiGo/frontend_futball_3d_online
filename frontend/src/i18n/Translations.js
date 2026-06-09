@@ -88,8 +88,8 @@ const translations = {
       controls: "Controls",
       moveInstructions: "Use WASD or ↑←↓→ to move",
       ballControlInstructions: "SPACE to control the ball (max 3s). Release SPACE to shoot. Press SPACE near a rival to steal the ball",
-      sprintInstructions: "Grab speed items on the pitch to run faster",
-      mobileSprintInstructions: "Grab speed items to run faster",
+      sprintInstructions: "Grab items on the pitch: 💨 cyan = speed boost, 🚀 orange = homing missile at the ball carrier",
+      mobileSprintInstructions: "Grab items: 💨 cyan = speed, 🚀 orange = missile",
       stamina: "BOOST",
       mute: "Mute sound",
       unmute: "Unmute sound",
@@ -118,6 +118,10 @@ const translations = {
       writeMessage: "Write a message...",
       enterToSend: "Press Enter to send messages",
       kickoffGo: "GO!",
+      missileReady: "🚀 Homing missile armed! It will fire at the next rival ball carrier",
+      missileAt: "🚀 Missile heading to",
+      missileIncoming: "⚠️ Missile heading to YOU! Pass the ball!",
+      missileHitOn: "💥 Missile hit",
     }
   },
 
@@ -208,8 +212,8 @@ const translations = {
       controls: "Controles",
       moveInstructions: "Usa WASD o ↑←↓→ para moverte",
       ballControlInstructions: "ESPACIO para controlar el balón (máx 3s). Suelta ESPACIO para disparar. Pulsa ESPACIO cerca de un rival para robarle el balón",
-      sprintInstructions: "Recoge ítems de velocidad en la cancha para correr más rápido",
-      mobileSprintInstructions: "Recoge ítems de velocidad para correr más rápido",
+      sprintInstructions: "Recoge ítems en la cancha: 💨 cian = velocidad, 🚀 naranja = misil teledirigido al rival con balón",
+      mobileSprintInstructions: "Recoge ítems: 💨 cian = velocidad, 🚀 naranja = misil",
       stamina: "BOOST",
       mute: "Silenciar sonido",
       unmute: "Activar sonido",
@@ -238,6 +242,10 @@ const translations = {
       writeMessage: "Escribe un mensaje...",
       enterToSend: "Presiona Enter para enviar mensajes",
       kickoffGo: "¡YA!",
+      missileReady: "🚀 ¡Misil teledirigido armado! Se disparará al próximo rival con balón",
+      missileAt: "🚀 Misil hacia",
+      missileIncoming: "⚠️ ¡Misil hacia TI! ¡Pasa el balón!",
+      missileHitOn: "💥 Misil impacta en",
     }
   }
 };

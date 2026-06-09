@@ -88,6 +88,8 @@ export function useGameSocket({
     const handleBallBounce = (data) => cb().onBallBounce?.(data);
     const handleItemCollected = (data) => cb().onItemCollected?.(data);
     const handleBallSteal = (data) => cb().onBallSteal?.(data);
+    const handleMissileLaunched = (data) => cb().onMissileLaunched?.(data);
+    const handleMissileHit = (data) => cb().onMissileHit?.(data);
     const handleJoinError = ({ message }) => cb().onError?.(message);
     const handleSelectTeamError = ({ message }) => cb().onError?.(message);
     const handleSelectCharacterError = ({ message }) => cb().onError?.(message);
@@ -111,6 +113,8 @@ export function useGameSocket({
     socket.on('ballBounce', handleBallBounce);
     socket.on('itemCollected', handleItemCollected);
     socket.on('ballSteal', handleBallSteal);
+    socket.on('missileLaunched', handleMissileLaunched);
+    socket.on('missileHit', handleMissileHit);
     socket.on('joinError', handleJoinError);
     socket.on('selectTeamError', handleSelectTeamError);
     socket.on('selectCharacterError', handleSelectCharacterError);
@@ -169,6 +173,8 @@ export function useGameSocket({
       socket.off('ballBounce', handleBallBounce);
       socket.off('itemCollected', handleItemCollected);
       socket.off('ballSteal', handleBallSteal);
+      socket.off('missileLaunched', handleMissileLaunched);
+      socket.off('missileHit', handleMissileHit);
       socket.off('joinError');
       socket.off('selectTeamError');
       socket.off('selectCharacterError');

@@ -330,38 +330,6 @@ const MobileJoystick = ({ onDirectionChange, onBallControlChange }) => {
                 </svg>
             )}
 
-            {/* Instrucción visual cuando no hay actividad */}
-            {!isActive && !isKicking && (
-                <div style={{
-                    position: 'fixed',
-                    bottom: `${30 + sizes.joystickSize + 15}px`,
-                    left: '30px',
-                    color: 'rgba(255,255,255,0.6)',
-                    fontSize: '12px',
-                    fontWeight: '500',
-                    textShadow: '0 1px 3px rgba(0,0,0,0.5)',
-                    zIndex: 1000,
-                    pointerEvents: 'none'
-                }}>
-                    ← MOVE
-                </div>
-            )}
-            {!isActive && !isKicking && (
-                <div style={{
-                    position: 'fixed',
-                    bottom: `${30 + sizes.buttonSize + 15}px`,
-                    right: '30px',
-                    color: 'rgba(255,255,255,0.6)',
-                    fontSize: '12px',
-                    fontWeight: '500',
-                    textShadow: '0 1px 3px rgba(0,0,0,0.5)',
-                    zIndex: 1000,
-                    pointerEvents: 'none',
-                    textAlign: 'right'
-                }}>
-                    HOLD TO CHARGE →
-                </div>
-            )}
         </>
     );
 };

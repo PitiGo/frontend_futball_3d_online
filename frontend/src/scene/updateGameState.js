@@ -33,6 +33,8 @@ export function createUpdateGameState(refs) {
     chargeFillRef,
     chargeContainerRef,
     fxRef,
+    missilesRef,
+    missileIndicatorRef,
   } = refs;
 
   // Tracks players whose mesh is being created asynchronously, to avoid
@@ -59,6 +61,7 @@ export function createUpdateGameState(refs) {
       matchTimeLeftMs,
       shotCharge,
       items,
+      missiles,
     } = gameState;
     const isMobileView = isMobileRef.current;
 
@@ -203,6 +206,7 @@ export function createUpdateGameState(refs) {
           characterManagerRef.current.updatePlayerAnimation(
             playerData.id,
             playerData.isMoving,
+            playerData.stunned,
           );
         }
       });
@@ -270,7 +274,7 @@ export function createUpdateGameState(refs) {
       ballRef.current.netTarget = { x: targetPosition.x, y: targetPosition.y, z: targetPosition.z };
     }
 
-    // Ítems de velocidad: crear/posicionar/eliminar según el estado autoritativo.
+    // Ítems: crear/posicionar/eliminar según el estado autoritativo.
     if (itemsRef && sceneRef.current && Array.isArray(items)) {
       const scene = sceneRef.current;
       const activeIds = new Set();
@@ -279,11 +283,19 @@ export function createUpdateGameState(refs) {
         activeIds.add(it.id);
         let mesh = itemsRef.current[it.id];
         if (!mesh) {
-          // Octaedro brillante tipo "power-up".
-          mesh = BABYLON.MeshBuilder.CreatePolyhedron(`item-${it.id}`, { type: 1, size: 0.45 }, scene);
+          const isMissile = it.type === 'missile';
+          // Power-ups: octaedro cian (velocidad) o pincho naranja/rojo (misil).
+          mesh = BABYLON.MeshBuilder.CreatePolyhedron(
+            `item-${it.id}`,
+            { type: isMissile ? 2 : 1, size: 0.45 },
+            scene,
+          );
           const mat = new BABYLON.StandardMaterial(`itemMat-${it.id}`, scene);
-          mat.emissiveColor = new BABYLON.Color3(0.2, 0.9, 1);
-          mat.diffuseColor = new BABYLON.Color3(0.2, 0.9, 1);
+          const color = isMissile
+            ? new BABYLON.Color3(1, 0.45, 0.15)
+            : new BABYLON.Color3(0.2, 0.9, 1);
+          mat.emissiveColor = color;
+          mat.diffuseColor = color;
           mat.specularColor = new BABYLON.Color3(0, 0, 0);
           mat.disableLighting = true;
           mesh.material = mat;
@@ -300,6 +312,41 @@ export function createUpdateGameState(refs) {
             mesh.dispose();
           }
           delete itemsRef.current[id];
+        }
+      });
+    }
+
+    // Misiles teledirigidos: crear/actualizar/eliminar según el estado autoritativo.
+    if (missilesRef && sceneRef.current && Array.isArray(missiles)) {
+      const scene = sceneRef.current;
+      const activeIds = new Set();
+      missiles.forEach((m) => {
+        if (!m?.id) return;
+        activeIds.add(m.id);
+        let mesh = missilesRef.current[m.id];
+        if (!mesh) {
+          mesh = BABYLON.MeshBuilder.CreateSphere(`missile-${m.id}`, { diameter: 0.4, segments: 8 }, scene);
+          const mat = new BABYLON.StandardMaterial(`missileMat-${m.id}`, scene);
+          mat.emissiveColor = new BABYLON.Color3(1, 0.3, 0.1);
+          mat.diffuseColor = new BABYLON.Color3(1, 0.3, 0.1);
+          mat.specularColor = new BABYLON.Color3(0, 0, 0);
+          mat.disableLighting = true;
+          mesh.material = mat;
+          mesh.isPickable = false;
+          mesh.position.set(m.x, 1.0, m.z);
+          missilesRef.current[m.id] = mesh;
+        }
+        // El bucle de render interpola hacia este objetivo a 60 fps (como balón/jugadores).
+        mesh.netTarget = { x: m.x, y: 1.0, z: m.z };
+      });
+      Object.keys(missilesRef.current).forEach((id) => {
+        if (!activeIds.has(id)) {
+          const mesh = missilesRef.current[id];
+          if (mesh) {
+            if (mesh.material) mesh.material.dispose();
+            mesh.dispose();
+          }
+          delete missilesRef.current[id];
         }
       });
     }
@@ -360,6 +407,10 @@ export function createUpdateGameState(refs) {
         staminaFillRef.current.style.boxShadow = self.isSprinting
           ? '0 0 10px rgba(56, 189, 248, 0.8)'
           : 'none';
+      }
+      // Indicador de misil armado (🚀): visible mientras llevas el power-up.
+      if (missileIndicatorRef?.current && self) {
+        missileIndicatorRef.current.style.display = self.missileArmed ? 'flex' : 'none';
       }
     }
 

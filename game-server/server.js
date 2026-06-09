@@ -123,6 +123,15 @@ const MAX_ITEMS = 3;                 // Máximo de ítems simultáneos en el cam
 const ITEM_SPAWN_INTERVAL_MS = 7000; // Cada cuánto aparece un ítem nuevo
 const ITEM_EDGE_MARGIN = 4;          // Margen desde los bordes para no spawnear pegado al muro
 
+// --- Misil teledirigido (power-up) ---
+// Al recogerlo queda "armado" y se dispara automáticamente contra el rival que
+// controle el balón. Al impactar, la víctima pierde el balón y queda aturdida.
+const MISSILE_ITEM_CHANCE = 0.35;    // Probabilidad de que un ítem sea misil (resto: velocidad)
+const MISSILE_SPEED = 14;            // Velocidad del misil (u/s); alcanzable pero difícil de esquivar
+const MISSILE_HIT_RADIUS = 0.9;      // Distancia de impacto
+const MISSILE_STUN_MS = 2200;        // Tiempo de parálisis de la víctima
+const MISSILE_MAX_AGE_MS = 8000;     // Autodestrucción si no alcanza al objetivo
+
 const TEAM_CHARACTERS = {
   left: ['player', 'pig'],
   right: ['turtle', 'lizard']
@@ -179,9 +188,11 @@ availableSalas.forEach(roomId => {
     botCounter: 0, // Contador para nombrar/identificar bots
     lastSent: new Map(), // id -> snapshot enviado (delta compression)
     emitCount: 0, // Contador de emisiones para keyframes periódicos
-    items: [], // Ítems de velocidad activos en la cancha: { id, x, z }
+    items: [], // Ítems activos en la cancha: { id, type, x, z }
     itemCounter: 0, // Contador para identificar ítems
     lastItemSpawn: 0, // Timestamp del último spawn de ítem
+    missiles: [], // Misiles teledirigidos en vuelo: { id, x, z, targetId, bornAt }
+    missileCounter: 0, // Contador para identificar misiles
   };
 });
 
@@ -298,6 +309,7 @@ function resetPlayersPositions(roomId, state, kickoffTeam = null) {
     player.stamina = 0;
     player.boosted = false;
     player.isSprinting = false;
+    player.stunnedUntil = 0;
     // Asegurarse de que el estado de movimiento esté inicializado
     if (!state.playerMovements.has(player.id)) {
       state.playerMovements.set(player.id, { moveDirection: Vector3.Zero() });
@@ -305,9 +317,10 @@ function resetPlayersPositions(roomId, state, kickoffTeam = null) {
       state.playerMovements.get(player.id).moveDirection.set(0, 0, 0);
     }
   });
-  // Limpiar ítems en cada saque para que no se recojan justo al reanudar.
+  // Limpiar ítems y misiles en cada saque para que no actúen justo al reanudar.
   state.items = [];
   state.lastItemSpawn = performance.now();
+  state.missiles = [];
   if (state.players.size > 0) {
     emitGameState(roomId, state);
   }
@@ -501,6 +514,7 @@ function resetFullRoomState(roomId, state) {
   state.gameOverData = null;
   state.items = [];
   state.lastItemSpawn = 0;
+  state.missiles = [];
   resetBall(state);
   state.readyState.left.clear();
   state.readyState.right.clear();
@@ -512,6 +526,8 @@ function resetFullRoomState(roomId, state) {
     player.stamina = 0;
     player.boosted = false;
     player.isSprinting = false;
+    player.stunnedUntil = 0;
+    player.missileArmed = false;
     // Los bots vuelven a quedar listos automáticamente. Los humanos conservan
     // su equipo y personaje, pero deben volver a pulsar "Listo".
     if (player.isBot && player.team) {
@@ -672,6 +688,8 @@ function createBot(state, team) {
     lastKickTime: 0,
     stamina: 0,
     boosted: false,
+    stunnedUntil: 0,
+    missileArmed: false,
     isSprinting: false,
     goals: 0,
   };
@@ -720,6 +738,12 @@ function updateBotAI(roomId, state) {
     if (!bot.isBot || !bot.team) return;
     const move = state.playerMovements.get(bot.id);
     if (!move) return;
+
+    // Aturdido por misil: el bot no decide nada hasta recuperarse.
+    if (now < (bot.stunnedUntil || 0)) {
+      move.moveDirection.set(0, 0, 0);
+      return;
+    }
 
     const toBallX = ball.x - bot.position.x;
     const toBallZ = ball.z - bot.position.z;
@@ -810,7 +834,8 @@ function spawnItem(state) {
     z = round2((Math.random() * 2 - 1) * halfH);
     if (Math.hypot(x, z) > 3) break;
   }
-  state.items.push({ id: `item-${state.itemCounter}`, x, z });
+  const type = Math.random() < MISSILE_ITEM_CHANCE ? 'missile' : 'speed';
+  state.items.push({ id: `item-${state.itemCounter}`, type, x, z });
 }
 
 // Spawn periódico y detección de recogida por jugadores.
@@ -833,13 +858,89 @@ function updateItems(roomId, state, now) {
       const dz = item.z - player.position.z;
       if (dx * dx + dz * dz <= reachSq) {
         state.items.splice(i, 1);
-        player.stamina = STAMINA_MAX;
-        player.boosted = true;
-        io.to(roomId).emit('itemCollected', { playerId: player.id, x: item.x, z: item.z });
+        if (item.type === 'missile') {
+          player.missileArmed = true;
+        } else {
+          player.stamina = STAMINA_MAX;
+          player.boosted = true;
+        }
+        io.to(roomId).emit('itemCollected', { playerId: player.id, type: item.type || 'speed', x: item.x, z: item.z });
         metrics.itemsCollectedTotal.inc({ room: roomId });
       }
     }
   });
+}
+
+// --- Misiles teledirigidos ---
+// Lanzamiento automático: cualquier jugador armado dispara en cuanto un RIVAL
+// controla el balón. El misil persigue a su objetivo; al impactar, la víctima
+// suelta el balón y queda aturdida (parálisis breve, baila en el cliente).
+function updateMissiles(roomId, state, now) {
+  const controller = getController(state);
+  if (controller && now >= (controller.stunnedUntil || 0)) {
+    state.players.forEach((player) => {
+      if (!player.missileArmed || !player.team) return;
+      if (controller.team === player.team || controller.id === player.id) return;
+      player.missileArmed = false;
+      state.missileCounter += 1;
+      state.missiles.push({
+        id: `missile-${state.missileCounter}`,
+        x: round2(player.position.x),
+        z: round2(player.position.z),
+        targetId: controller.id,
+        bornAt: now,
+      });
+      io.to(roomId).emit('missileLaunched', {
+        byId: player.id,
+        byName: player.name,
+        targetId: controller.id,
+        targetName: controller.name,
+      });
+      log(`[${roomId}] ${player.name} lanza un MISIL contra ${controller.name}.`);
+    });
+  }
+
+  if (state.missiles.length === 0) return;
+
+  for (let i = state.missiles.length - 1; i >= 0; i -= 1) {
+    const missile = state.missiles[i];
+    const target = state.players.get(missile.targetId);
+    if (!target || !target.team || now - missile.bornAt > MISSILE_MAX_AGE_MS) {
+      state.missiles.splice(i, 1);
+      continue;
+    }
+
+    const dx = target.position.x - missile.x;
+    const dz = target.position.z - missile.z;
+    const dist = Math.hypot(dx, dz);
+
+    if (dist <= MISSILE_HIT_RADIUS) {
+      if (target.isControllingBall) {
+        target.isControllingBall = false;
+        // El balón sale despedido en una dirección aleatoria (caos controlado).
+        const angle = Math.random() * Math.PI * 2;
+        state.ballVelocity.set(Math.cos(angle) * 8, 0, Math.sin(angle) * 8);
+        state.ballLastShotTime = now;
+      }
+      target.stunnedUntil = now + MISSILE_STUN_MS;
+      target.controlLockUntil = now + MISSILE_STUN_MS;
+      target.wantsControl = false;
+      target.velocity.set(0, 0, 0);
+      io.to(roomId).emit('missileHit', {
+        targetId: target.id,
+        targetName: target.name,
+        x: round2(target.position.x),
+        z: round2(target.position.z),
+      });
+      log(`[${roomId}] MISIL impacta en ${target.name} (aturdido ${MISSILE_STUN_MS}ms).`);
+      state.missiles.splice(i, 1);
+      continue;
+    }
+
+    const step = MISSILE_SPEED * PHYSICS_DT;
+    missile.x = round2(missile.x + (dx / (dist || 1)) * step);
+    missile.z = round2(missile.z + (dz / (dist || 1)) * step);
+  }
 }
 
 // Devuelve el jugador que controla el balón ahora mismo (o null).
@@ -870,6 +971,7 @@ function tryStealBall(roomId, state, stealer) {
 
   const now = performance.now();
   if (now < (controller.controlProtectedUntil || 0)) return false;
+  if (now < (stealer.stunnedUntil || 0)) return false;
 
   const stats = getCharacterStats(stealer.characterType);
   const reach = (stats.controlRadius || BALL_CONTROL_RADIUS) * STEAL_RADIUS_BONUS;
@@ -964,6 +1066,14 @@ function updateGamePhysics(roomId, state) {
       return;
     }
 
+    // Aturdido por misil: paralizado, sin sprint y sin responder al input.
+    if (now < (player.stunnedUntil || 0)) {
+      player.velocity.set(0, 0, 0);
+      player.isSprinting = false;
+      player.position.y = playerRadius;
+      return;
+    }
+
     // Boost de velocidad por ítem: se gasta la "stamina" al moverse mientras esté
     // activo; al agotarse, el boost termina hasta recoger otro ítem.
     const isMoving = movement.moveDirection.lengthSquared() > 0.01;
@@ -1017,6 +1127,9 @@ function updateGamePhysics(roomId, state) {
 
   // Ítems de velocidad: spawn periódico y recogida (posiciones ya actualizadas).
   updateItems(roomId, state, now);
+
+  // Misiles teledirigidos: lanzamiento automático, persecución e impacto.
+  updateMissiles(roomId, state, now);
 
   // 2. Actualizar Pelota
   if (kickoffFrozen) {
@@ -1154,6 +1267,7 @@ function updateGamePhysics(roomId, state) {
       playerCurrentlyControllingId === null &&
       player.wantsControl &&
       now >= (player.controlLockUntil || 0) &&
+      now >= (player.stunnedUntil || 0) &&
       distSq < (controlRadius * PICKUP_RADIUS_BONUS) * (controlRadius * PICKUP_RADIUS_BONUS)
     ) {
       grantControl(state, player);
@@ -1229,9 +1343,10 @@ function maybeEmitBounce(roomId, state) {
 // el cliente sepa qué jugadores siguen en la sala, enviamos `roster` con todos
 // los ids (barato) y solo elimina los que ya no estén ahí.
 const POS_EPSILON = 0.02;
-function playerChanged(prev, x, z, isMoving, isControllingBall, stamina, isSprinting) {
+function playerChanged(prev, x, z, isMoving, isControllingBall, stamina, isSprinting, stunned, missileArmed) {
   if (!prev) return true;
   if (prev.isMoving !== isMoving || prev.isControllingBall !== isControllingBall || prev.isSprinting !== isSprinting) return true;
+  if (prev.stunned !== stunned || prev.missileArmed !== missileArmed) return true;
   if (Math.abs(prev.stamina - stamina) >= 0.02) return true;
   if (Math.abs(prev.x - x) >= POS_EPSILON || Math.abs(prev.z - z) >= POS_EPSILON) return true;
   return false;
@@ -1254,10 +1369,12 @@ function emitGameState(roomId, state) {
     const isControllingBall = p.isControllingBall;
     const stamina = Math.round((p.stamina / STAMINA_MAX) * 100) / 100; // 0..1 normalizado
     const isSprinting = p.isSprinting;
+    const stunned = performance.now() < (p.stunnedUntil || 0);
+    const missileArmed = !!p.missileArmed;
 
     const prev = state.lastSent.get(p.id);
     const isNew = !prev;
-    if (forceFull || isNew || playerChanged(prev, x, z, isMoving, isControllingBall, stamina, isSprinting)) {
+    if (forceFull || isNew || playerChanged(prev, x, z, isMoving, isControllingBall, stamina, isSprinting, stunned, missileArmed)) {
       const entry = {
         id: p.id,
         position: vector3ToNetObject(p.position),
@@ -1265,6 +1382,8 @@ function emitGameState(roomId, state) {
         isControllingBall,
         stamina,
         isSprinting,
+        stunned,
+        missileArmed,
       };
       // Adjuntar datos estáticos en el primer envío y en cada keyframe, para que
       // el cliente nunca renderice un personaje/equipo equivocado por una carrera
@@ -1274,7 +1393,7 @@ function emitGameState(roomId, state) {
         entry.team = p.team;
       }
       playersData.push(entry);
-      state.lastSent.set(p.id, { x, z, isMoving, isControllingBall, stamina, isSprinting });
+      state.lastSent.set(p.id, { x, z, isMoving, isControllingBall, stamina, isSprinting, stunned, missileArmed });
     }
   });
   // Purgar del cache jugadores que ya no existen.
@@ -1305,6 +1424,7 @@ function emitGameState(roomId, state) {
     controlRemainingMs,
     shotCharge,
     items: state.items,
+    missiles: state.missiles.map((m) => ({ id: m.id, x: m.x, z: m.z })),
   };
 
   // Emitir a la sala específica
@@ -1391,6 +1511,8 @@ io.on('connection', (socket) => {
       stamina: 0,             // Combustible del boost (0..STAMINA_MAX); se recarga con ítems
       boosted: false,         // Boost de velocidad activo (tras recoger un ítem)
       isSprinting: false,     // Estado real de boost (resuelto en física), para visuales
+      stunnedUntil: 0,        // Aturdido por misil hasta este timestamp (no se mueve ni controla)
+      missileArmed: false,    // Lleva un misil listo para dispararse contra el rival con balón
       goals: 0,               // Goles anotados en el partido actual
       roomId: roomId // Referencia a su sala
     };
@@ -1633,10 +1755,12 @@ io.on('connection', (socket) => {
     //log(`[${currentRoomId}] -> ballControl de ${player.name}. Control: ${control}`);
 
     if (control === true) {
+      const now = performance.now();
+      // Aturdido por misil: no puede pedir el balón ni robar hasta recuperarse.
+      if (now < (player.stunnedUntil || 0)) return;
       // Intención de control mantenida: la física recogerá el balón en cuanto esté
       // a tu alcance (recogida pegajosa), sin pulsar en el instante exacto.
       player.wantsControl = true;
-      const now = performance.now();
       // Tras perder el balón en un robo, la víctima no puede recuperarlo al instante.
       if (now < (player.controlLockUntil || 0)) return;
 

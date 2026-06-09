@@ -16,17 +16,20 @@ const GameToast = ({ message, type = 'error', onDismiss, duration = 4000 }) => {
       role="alert"
       style={{
         position: 'fixed',
-        top: '1rem',
+        // Debajo de la franja del marcador + reloj (~90px), para no taparlos.
+        top: '96px',
         left: '50%',
         transform: 'translateX(-50%)',
         zIndex: 10000,
         backgroundColor: bg,
         color: 'white',
-        padding: '0.75rem 1.25rem',
+        padding: '0.6rem 1.1rem',
         borderRadius: '8px',
         boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
         maxWidth: '90vw',
-        fontSize: '0.95rem',
+        fontSize: '0.9rem',
+        textAlign: 'center',
+        pointerEvents: 'none',
         animation: 'fadeIn 0.3s ease',
       }}
     >

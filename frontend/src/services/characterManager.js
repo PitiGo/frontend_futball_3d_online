@@ -193,11 +193,12 @@ class CharacterManager {
         }
     }
 
-    updatePlayerAnimation(playerId, isMoving) {
+    updatePlayerAnimation(playerId, isMoving, stunned = false) {
         const playerData = this.playerInstances.get(playerId);
         if (!playerData) return;
 
-        const animationName = isMoving ? 'running' : 'idle';
+        // Aturdido por misil: baila hasta recuperarse (prioridad sobre todo).
+        const animationName = stunned ? 'dancing' : (isMoving ? 'running' : 'idle');
         this.startAnimation(playerId, animationName);
     }
 

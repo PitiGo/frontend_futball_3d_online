@@ -500,6 +500,26 @@ export function createGameScene(canvas, { refs, isMobileRef, onSceneReady, onLoa
         kickPs.manualEmitCount = 0;
         kickPs.start();
 
+        // Explosión de misil: bola de fuego compacta naranja/roja.
+        const explosionPs = new BABYLON.ParticleSystem('explosionPs', 120, scene);
+        explosionPs.particleTexture = sparkTexture;
+        explosionPs.emitter = new BABYLON.Vector3(0, -50, 0);
+        explosionPs.minSize = 0.25;
+        explosionPs.maxSize = 0.6;
+        explosionPs.minLifeTime = 0.25;
+        explosionPs.maxLifeTime = 0.7;
+        explosionPs.minEmitPower = 5;
+        explosionPs.maxEmitPower = 12;
+        explosionPs.direction1 = new BABYLON.Vector3(-1, 0.2, -1);
+        explosionPs.direction2 = new BABYLON.Vector3(1, 2.5, 1);
+        explosionPs.gravity = new BABYLON.Vector3(0, -9.8, 0);
+        explosionPs.color1 = new BABYLON.Color4(1, 0.7, 0.2, 1);
+        explosionPs.color2 = new BABYLON.Color4(1, 0.3, 0.05, 1);
+        explosionPs.colorDead = new BABYLON.Color4(0.4, 0.1, 0.05, 0);
+        explosionPs.blendMode = BABYLON.ParticleSystem.BLENDMODE_ADD;
+        explosionPs.manualEmitCount = 0;
+        explosionPs.start();
+
         // Explosión de celebración en la boca de la portería.
         const goalPs = new BABYLON.ParticleSystem('goalPs', 200, scene);
         goalPs.particleTexture = sparkTexture;
@@ -534,6 +554,12 @@ export function createGameScene(canvas, { refs, isMobileRef, onSceneReady, onLoa
             kickPs.manualEmitCount += mobile ? 10 : 20;
         };
 
+        const explosionBurst = (pos) => {
+            explosionPs.emitter = new BABYLON.Vector3(pos.x, (pos.y || 1), pos.z);
+            explosionPs.manualEmitCount += mobile ? 40 : 80;
+            shakeCamera(0.4);
+        };
+
         const goalBurst = (scoringTeam) => {
             // El equipo 'left' marca en la portería derecha (x > 0) y viceversa.
             const goalX = scoringTeam === 'left' ? FIELD_WIDTH / 2 : -FIELD_WIDTH / 2;
@@ -552,7 +578,7 @@ export function createGameScene(canvas, { refs, isMobileRef, onSceneReady, onLoa
         };
 
         if (refs.fxRef) {
-            refs.fxRef.current = { shakeCamera, kickBurst, goalBurst };
+            refs.fxRef.current = { shakeCamera, kickBurst, goalBurst, explosionBurst };
         }
 
         // --- PORTERÍAS ---
@@ -603,6 +629,18 @@ export function createGameScene(canvas, { refs, isMobileRef, onSceneReady, onLoa
                 for (const id in players) interpolateNet(players[id], smooth);
             }
             if (refs.ballRef.current) interpolateNet(refs.ballRef.current, smooth);
+
+            // Misiles: interpolar hacia el último estado del servidor + pulso visual.
+            const missileMeshes = refs.missilesRef?.current;
+            if (missileMeshes) {
+                const pulse = 1 + 0.25 * Math.sin(performance.now() * 0.02);
+                for (const id in missileMeshes) {
+                    const m = missileMeshes[id];
+                    if (!m) continue;
+                    interpolateNet(m, smooth);
+                    m.scaling.set(pulse, pulse, pulse);
+                }
+            }
 
             // Deriva lenta de nubes: el cielo deja de ser un fondo estático.
             skyDome.rotation.y += 0.000018 * dtMs;
