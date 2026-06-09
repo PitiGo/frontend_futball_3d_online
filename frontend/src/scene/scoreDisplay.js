@@ -34,5 +34,25 @@ export function createScoreDisplay(advancedTexture) {
   rightScoreText.left = '40px';
   scoreBackground.addControl(rightScoreText);
 
-  return { left: leftScoreText, right: rightScoreText };
+  // Brief scale-up of the digit that just changed (goal feedback).
+  const BASE_FONT_SIZE = 24;
+  const PULSE_DURATION_MS = 500;
+  const pulseTimers = { left: null, right: null };
+  const pulse = (side) => {
+    const block = side === 'left' ? leftScoreText : rightScoreText;
+    if (pulseTimers[side]) clearInterval(pulseTimers[side]);
+    const start = performance.now();
+    pulseTimers[side] = setInterval(() => {
+      const t = (performance.now() - start) / PULSE_DURATION_MS;
+      if (t >= 1) {
+        block.fontSize = BASE_FONT_SIZE;
+        clearInterval(pulseTimers[side]);
+        pulseTimers[side] = null;
+        return;
+      }
+      block.fontSize = Math.round(BASE_FONT_SIZE + Math.sin(t * Math.PI) * 14);
+    }, 30);
+  };
+
+  return { left: leftScoreText, right: rightScoreText, pulse };
 }

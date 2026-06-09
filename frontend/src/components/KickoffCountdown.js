@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useTranslation } from '../i18n/LanguageContext';
+import { playCountdownTick, playCountdownGo } from '../services/sound';
 
 const KickoffCountdown = ({ kickoffEndsAt, isMobile }) => {
   const { t } = useTranslation();
@@ -13,6 +14,7 @@ const KickoffCountdown = ({ kickoffEndsAt, isMobile }) => {
 
     let goTimeout;
     let goTriggered = false;
+    let lastSecond = null;
 
     const tick = () => {
       const remaining = kickoffEndsAt - Date.now();
@@ -20,11 +22,17 @@ const KickoffCountdown = ({ kickoffEndsAt, isMobile }) => {
         if (goTriggered) return; // Avoid re-showing "GO!" on every tick.
         goTriggered = true;
         clearInterval(interval); // Stop ticking once kickoff starts.
+        playCountdownGo();
         setDisplay(t('gameUI.kickoffGo'));
         goTimeout = setTimeout(() => setDisplay(null), 700);
         return;
       }
-      setDisplay(String(Math.ceil(remaining / 1000)));
+      const second = Math.ceil(remaining / 1000);
+      if (second !== lastSecond) {
+        lastSecond = second;
+        playCountdownTick();
+      }
+      setDisplay(String(second));
     };
 
     // Create the interval before the first tick so tick() can clear it.

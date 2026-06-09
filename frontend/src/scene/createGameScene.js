@@ -379,6 +379,18 @@ export function createGameScene(canvas, { refs, isMobileRef, onSceneReady, onLoa
         dirLight.intensity = 0.6;
         dirLight.diffuse = new BABYLON.Color3(1, 0.98, 0.9); // Luz solar cálida
 
+        // Glow sutil para elementos emisivos (estela, ítems, anillos de control).
+        // Desactivado en móvil por coste de la pasada de blur.
+        if (!mobile) {
+            const glow = new BABYLON.GlowLayer('glow', scene, { blurKernelSize: 32 });
+            glow.intensity = 0.55;
+            // El cielo y el cartel usan texturas emisivas solo para ignorar la luz:
+            // no deben "brillar".
+            glow.addExcludedMesh(skyDome);
+            const bannerMesh = scene.getMeshByName('gameBanner');
+            if (bannerMesh) glow.addExcludedMesh(bannerMesh);
+        }
+
         // Definir las dimensiones del campo como constantes al inicio
         createProceduralField(scene);
 
@@ -421,6 +433,128 @@ export function createGameScene(canvas, { refs, isMobileRef, onSceneReady, onLoa
             console.error('Error cargando modelo del balón:', error);
         });
 
+        // --- SOMBRAS "BLOB" (discos suaves bajo jugadores y balón) ---
+        // Sin shadow maps (caros): un disco con gradiente radial ancla visualmente
+        // a los personajes y al balón al suelo, mejorando la percepción de profundidad.
+        const shadowTexture = new BABYLON.DynamicTexture('blobShadowTex', 128, scene, false);
+        const shCtx = shadowTexture.getContext();
+        const shGrad = shCtx.createRadialGradient(64, 64, 6, 64, 64, 62);
+        shGrad.addColorStop(0, 'rgba(0,0,0,0.55)');
+        shGrad.addColorStop(0.6, 'rgba(0,0,0,0.28)');
+        shGrad.addColorStop(1, 'rgba(0,0,0,0)');
+        shCtx.clearRect(0, 0, 128, 128);
+        shCtx.fillStyle = shGrad;
+        shCtx.fillRect(0, 0, 128, 128);
+        shadowTexture.update();
+        shadowTexture.hasAlpha = true;
+
+        const shadowMaterial = new BABYLON.StandardMaterial('blobShadowMat', scene);
+        shadowMaterial.diffuseColor = new BABYLON.Color3(0, 0, 0);
+        shadowMaterial.specularColor = new BABYLON.Color3(0, 0, 0);
+        shadowMaterial.opacityTexture = shadowTexture;
+        shadowMaterial.disableLighting = true;
+        shadowMaterial.freeze();
+
+        const makeBlobShadow = (name, size) => {
+            const disc = BABYLON.MeshBuilder.CreatePlane(name, { size }, scene);
+            disc.rotation.x = Math.PI / 2;
+            disc.position.y = 0.035; // Sobre las líneas (0.02) para evitar z-fighting
+            disc.material = shadowMaterial;
+            disc.isPickable = false;
+            return disc;
+        };
+
+        const ballShadow = makeBlobShadow('ballShadow', 1.1);
+        const playerShadows = {};
+
+        // --- EFECTOS DE IMPACTO Y GOL (sistemas de partículas reutilizables) ---
+        const sparkTexture = new BABYLON.DynamicTexture('sparkTex', 64, scene, false);
+        const spCtx = sparkTexture.getContext();
+        const spGrad = spCtx.createRadialGradient(32, 32, 2, 32, 32, 30);
+        spGrad.addColorStop(0, 'rgba(255,255,255,1)');
+        spGrad.addColorStop(0.4, 'rgba(255,255,255,0.6)');
+        spGrad.addColorStop(1, 'rgba(255,255,255,0)');
+        spCtx.clearRect(0, 0, 64, 64);
+        spCtx.fillStyle = spGrad;
+        spCtx.fillRect(0, 0, 64, 64);
+        sparkTexture.update();
+        sparkTexture.hasAlpha = true;
+
+        // Ráfaga corta al golpear el balón.
+        const kickPs = new BABYLON.ParticleSystem('kickPs', 60, scene);
+        kickPs.particleTexture = sparkTexture;
+        kickPs.emitter = new BABYLON.Vector3(0, -50, 0); // Fuera de vista hasta el primer uso
+        kickPs.minSize = 0.12;
+        kickPs.maxSize = 0.3;
+        kickPs.minLifeTime = 0.12;
+        kickPs.maxLifeTime = 0.3;
+        kickPs.minEmitPower = 3;
+        kickPs.maxEmitPower = 7;
+        kickPs.direction1 = new BABYLON.Vector3(-1, 0.3, -1);
+        kickPs.direction2 = new BABYLON.Vector3(1, 1.2, 1);
+        kickPs.gravity = new BABYLON.Vector3(0, -12, 0);
+        kickPs.color1 = new BABYLON.Color4(1, 0.95, 0.7, 1);
+        kickPs.color2 = new BABYLON.Color4(1, 0.6, 0.2, 1);
+        kickPs.colorDead = new BABYLON.Color4(1, 0.5, 0.1, 0);
+        kickPs.blendMode = BABYLON.ParticleSystem.BLENDMODE_ADD;
+        kickPs.manualEmitCount = 0;
+        kickPs.start();
+
+        // Explosión de celebración en la boca de la portería.
+        const goalPs = new BABYLON.ParticleSystem('goalPs', 200, scene);
+        goalPs.particleTexture = sparkTexture;
+        goalPs.emitter = new BABYLON.Vector3(0, -50, 0);
+        goalPs.minEmitBox = new BABYLON.Vector3(-0.5, 0, -3);
+        goalPs.maxEmitBox = new BABYLON.Vector3(0.5, 1, 3);
+        goalPs.minSize = 0.2;
+        goalPs.maxSize = 0.55;
+        goalPs.minLifeTime = 0.6;
+        goalPs.maxLifeTime = 1.4;
+        goalPs.minEmitPower = 6;
+        goalPs.maxEmitPower = 14;
+        goalPs.direction1 = new BABYLON.Vector3(-1, 2, -1);
+        goalPs.direction2 = new BABYLON.Vector3(1, 5, 1);
+        goalPs.gravity = new BABYLON.Vector3(0, -9.8, 0);
+        goalPs.blendMode = BABYLON.ParticleSystem.BLENDMODE_ADD;
+        goalPs.manualEmitCount = 0;
+        goalPs.start();
+
+        // --- SACUDIDA DE CÁMARA (game feel en goles y disparos) ---
+        // targetScreenOffset desplaza el encuadre sin tocar target/posición, así no
+        // interfiere con el lockedTarget del jugador.
+        let shakeAmplitude = 0;
+        let shakeElapsedMs = 0;
+        const shakeCamera = (intensity = 0.3) => {
+            shakeAmplitude = Math.max(shakeAmplitude, intensity);
+            shakeElapsedMs = 0;
+        };
+
+        const kickBurst = (pos) => {
+            kickPs.emitter = new BABYLON.Vector3(pos.x, (pos.y || 0.5), pos.z);
+            kickPs.manualEmitCount += mobile ? 10 : 20;
+        };
+
+        const goalBurst = (scoringTeam) => {
+            // El equipo 'left' marca en la portería derecha (x > 0) y viceversa.
+            const goalX = scoringTeam === 'left' ? FIELD_WIDTH / 2 : -FIELD_WIDTH / 2;
+            goalPs.emitter = new BABYLON.Vector3(goalX, 1.2, 0);
+            if (scoringTeam === 'left') {
+                goalPs.color1 = new BABYLON.Color4(0.3, 0.55, 1, 1);
+                goalPs.color2 = new BABYLON.Color4(0.6, 0.8, 1, 1);
+                goalPs.colorDead = new BABYLON.Color4(0.2, 0.4, 1, 0);
+            } else {
+                goalPs.color1 = new BABYLON.Color4(1, 0.35, 0.3, 1);
+                goalPs.color2 = new BABYLON.Color4(1, 0.7, 0.4, 1);
+                goalPs.colorDead = new BABYLON.Color4(1, 0.25, 0.2, 0);
+            }
+            goalPs.manualEmitCount += mobile ? 70 : 140;
+            shakeCamera(0.55);
+        };
+
+        if (refs.fxRef) {
+            refs.fxRef.current = { shakeCamera, kickBurst, goalBurst };
+        }
+
         // --- PORTERÍAS ---
         createGoal(scene, new BABYLON.Vector3(-FIELD_WIDTH / 2, 0, 0), true);
         createGoal(scene, new BABYLON.Vector3(FIELD_WIDTH / 2, 0, 0), false);
@@ -461,13 +595,58 @@ export function createGameScene(canvas, { refs, isMobileRef, onSceneReady, onLoa
 
         refs.sceneRef.current.registerBeforeRender(() => {
             // Suavizado de posiciones (jugadores + balón) hacia el último estado.
-            const netDt = Math.max(1, scene.getEngine().getDeltaTime()) / 1000;
+            const dtMs = Math.max(1, scene.getEngine().getDeltaTime());
+            const netDt = dtMs / 1000;
             const smooth = 1 - Math.exp(-NET_SMOOTH_K * netDt);
             const players = refs.playersRef.current;
             if (players) {
                 for (const id in players) interpolateNet(players[id], smooth);
             }
             if (refs.ballRef.current) interpolateNet(refs.ballRef.current, smooth);
+
+            // Deriva lenta de nubes: el cielo deja de ser un fondo estático.
+            skyDome.rotation.y += 0.000018 * dtMs;
+
+            // Sombras blob: seguir al balón (encogiendo con la altura) y a los jugadores.
+            const ballMeshForShadow = refs.ballRef.current;
+            if (ballMeshForShadow) {
+                ballShadow.position.x = ballMeshForShadow.position.x;
+                ballShadow.position.z = ballMeshForShadow.position.z;
+                const height = Math.max(0, ballMeshForShadow.position.y - 0.5);
+                const s = 1 / (1 + height * 0.8);
+                ballShadow.scaling.set(s, s, 1);
+            }
+            if (players) {
+                for (const id in players) {
+                    if (!playerShadows[id]) {
+                        playerShadows[id] = makeBlobShadow(`playerShadow-${id}`, 1.7);
+                    }
+                    playerShadows[id].position.x = players[id].position.x;
+                    playerShadows[id].position.z = players[id].position.z;
+                }
+                for (const id in playerShadows) {
+                    if (!players[id]) {
+                        playerShadows[id].dispose();
+                        delete playerShadows[id];
+                    }
+                }
+            }
+
+            // Sacudida de cámara con decaimiento exponencial.
+            if (shakeAmplitude > 0) {
+                shakeElapsedMs += dtMs;
+                const decay = Math.exp(-shakeElapsedMs / 160);
+                if (decay < 0.04) {
+                    shakeAmplitude = 0;
+                    camera.targetScreenOffset.set(0, 0);
+                } else {
+                    const a = shakeAmplitude * decay;
+                    camera.targetScreenOffset.set(
+                        (Math.random() - 0.5) * 2 * a,
+                        (Math.random() - 0.5) * 2 * a,
+                    );
+                }
+            }
 
             // Giro continuo de los ítems de velocidad (efecto power-up).
             const items = refs.itemsRef.current;

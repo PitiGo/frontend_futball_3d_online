@@ -32,6 +32,7 @@ export function createUpdateGameState(refs) {
     lastMatchSecondRef,
     chargeFillRef,
     chargeContainerRef,
+    fxRef,
   } = refs;
 
   // Tracks players whose mesh is being created asynchronously, to avoid
@@ -238,6 +239,11 @@ export function createUpdateGameState(refs) {
         // Plausible shot range: ignore tiny drift and huge teleports (kickoff resets).
         if (step > 0.8 && step < 4 && prevBallStep < 0.5) {
           playKick();
+          // Impact feedback: spark burst at the ball + a tiny camera nudge,
+          // scaled by how hard the shot was.
+          const punch = Math.min(1, (step - 0.8) / 2.4);
+          fxRef?.current?.kickBurst?.(ballPosition);
+          fxRef?.current?.shakeCamera?.(0.08 + punch * 0.14);
         }
         prevBallStep = step;
       }

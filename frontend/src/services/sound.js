@@ -137,3 +137,47 @@ export function playWhistle() {
   tone({ freq: 2200, type: 'sine', dur: 0.16, gain: 0.14 });
   tone({ freq: 2200, type: 'sine', dur: 0.18, gain: 0.14, delay: 0.2 });
 }
+
+/** Crowd roar after a goal: a swelling band-passed noise wash. */
+export function playCrowdCheer() {
+  const c = getCtx();
+  if (!c || muted) return;
+  const t0 = c.currentTime;
+  const dur = 1.6;
+  const bufferSize = Math.floor(c.sampleRate * dur);
+  const buffer = c.createBuffer(1, bufferSize, c.sampleRate);
+  const data = buffer.getChannelData(0);
+  for (let i = 0; i < bufferSize; i += 1) {
+    data[i] = Math.random() * 2 - 1;
+  }
+  const src = c.createBufferSource();
+  src.buffer = buffer;
+  const filter = c.createBiquadFilter();
+  filter.type = 'bandpass';
+  filter.frequency.setValueAtTime(700, t0);
+  filter.frequency.linearRampToValueAtTime(1100, t0 + 0.4);
+  filter.frequency.linearRampToValueAtTime(500, t0 + dur);
+  filter.Q.value = 0.7;
+  const g = c.createGain();
+  // Attack → sustain → release: simulates the stadium "swell".
+  g.gain.setValueAtTime(0.0001, t0);
+  g.gain.exponentialRampToValueAtTime(0.22, t0 + 0.18);
+  g.gain.setValueAtTime(0.22, t0 + 0.7);
+  g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+  src.connect(filter);
+  filter.connect(g);
+  g.connect(c.destination);
+  src.start(t0);
+  src.stop(t0 + dur);
+}
+
+/** Short tick for the kickoff countdown digits. */
+export function playCountdownTick() {
+  tone({ freq: 880, type: 'square', dur: 0.07, gain: 0.08 });
+}
+
+/** Bright "GO!" cue when the countdown finishes. */
+export function playCountdownGo() {
+  tone({ freq: 1175, type: 'square', dur: 0.18, gain: 0.12 });
+  tone({ freq: 1760, type: 'triangle', dur: 0.22, gain: 0.1, delay: 0.04 });
+}

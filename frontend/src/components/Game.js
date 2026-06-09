@@ -12,7 +12,7 @@ import { useSearchParams } from 'react-router-dom';
 import { useControls } from '../hooks/useControls';
 import { useScene } from '../hooks/useScene';
 import { useGameSocket } from '../hooks/useGameSocket';
-import { initAudio, playGoal, playWhistle, playBounce, playItem, playTackle, toggleMuted, isMuted } from '../services/sound';
+import { initAudio, playGoal, playCrowdCheer, playWhistle, playBounce, playItem, playTackle, toggleMuted, isMuted } from '../services/sound';
 
 const MAX_CHAT_MESSAGES = 50;
 
@@ -73,6 +73,7 @@ const Game = () => {
     const [connectionStatus, setConnectionStatus] = useState('connected');
     const chargeFillRef = useRef(null);
     const chargeContainerRef = useRef(null);
+    const fxRef = useRef(null); // Efectos de escena: sacudida de cámara, ráfagas de partículas
 
     const [showingEndMessage, setShowingEndMessage] = useState(false);
 
@@ -223,6 +224,7 @@ const Game = () => {
         lastMatchSecondRef,
         chargeFillRef,
         chargeContainerRef,
+        fxRef,
     }), [setConnectedPlayers]);
 
     const onSceneReady = useCallback(() => setSceneReady(true), []);
@@ -277,6 +279,9 @@ const Game = () => {
         onGoalScored: ({ team, score: newScore, scorerName, ownGoal }) => {
             setScore(newScore);
             playGoal();
+            playCrowdCheer();
+            fxRef.current?.goalBurst?.(team);
+            scoreTextRef.current?.pulse?.(team);
             if (scorerName) {
                 const label = ownGoal
                     ? `${t('gameUI.ownGoal')}: ${scorerName}`
@@ -859,11 +864,11 @@ const Game = () => {
                                 gap: '16px',
                                 alignItems: 'center'
                             }}>
-                                <span style={{ color: '#3b82f6', fontSize: '24px' }}>
+                                <span key={`score-l-${score.left}`} style={{ color: '#3b82f6', fontSize: '24px', display: 'inline-block', animation: 'scorePop 0.5s ease' }}>
                                     {score.left}
                                 </span>
                                 <span style={{ color: 'white', fontSize: '24px' }}>-</span>
-                                <span style={{ color: '#ef4444', fontSize: '24px' }}>
+                                <span key={`score-r-${score.right}`} style={{ color: '#ef4444', fontSize: '24px', display: 'inline-block', animation: 'scorePop 0.5s ease' }}>
                                     {score.right}
                                 </span>
                             </div>
