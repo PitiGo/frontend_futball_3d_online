@@ -10,7 +10,7 @@ function staminaColor(fraction) {
   return 'linear-gradient(90deg, #ef4444, #fca5a5)';
 }
 
-const MISSILE_GLB_SCALE = 0.5;
+const MISSILE_GLB_SCALE = 1.5;
 
 function disposeMeshOrNode(mesh) {
   if (!mesh) return;
