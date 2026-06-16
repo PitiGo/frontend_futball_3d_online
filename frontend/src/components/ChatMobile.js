@@ -44,6 +44,8 @@ const ChatMobile = ({ messages, onSend, teams }) => {
             <div className="flex gap-1">
               <input
                 type="text"
+                name="chatMessage"
+                autoComplete="off"
                 value={inputValue}
                 onChange={(e) => setInputValue(e.target.value)}
                 className="flex-1 bg-white bg-opacity-5 text-white text-xs p-2 rounded"

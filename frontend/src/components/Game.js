@@ -1020,6 +1020,8 @@ const Game = () => {
                                     >
                                         <input
                                             type="text"
+                                            name="chatMessage"
+                                            autoComplete="off"
                                             value={chatInput}
                                             onChange={(e) => setChatInput(e.target.value)}
                                             onFocus={() => { chatInputFocusRef.current = true; }}
@@ -1279,6 +1281,8 @@ const Game = () => {
                                         >
                                             <input
                                                 type="text"
+                                                name="chatMessage"
+                                                autoComplete="off"
                                                 value={chatInput}
                                                 onChange={(e) => setChatInput(e.target.value)}
                                                 onFocus={() => { chatInputFocusRef.current = true; }}
