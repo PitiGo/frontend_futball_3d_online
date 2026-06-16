@@ -781,6 +781,26 @@ function updateBotAI(roomId, state) {
         io.to(roomId).emit('ballSteal', { byId: bot.id, fromId: controller.id, x: round2(ball.x), z: round2(ball.z) });
         metrics.ballStealsTotal.inc({ room: roomId, by: 'bot' });
       }
+
+      // Disparo manual del bot: reacción probabilística mientras un rival controla el balón.
+      if (bot.missileArmed && now >= (controller.stunnedUntil || 0) && Math.random() < 0.05) {
+        bot.missileArmed = false;
+        state.missileCounter += 1;
+        state.missiles.push({
+          id: `missile-${state.missileCounter}`,
+          x: round2(bot.position.x),
+          z: round2(bot.position.z),
+          targetId: controller.id,
+          bornAt: now,
+        });
+        io.to(roomId).emit('missileLaunched', {
+          byId: bot.id,
+          byName: bot.name,
+          targetId: controller.id,
+          targetName: controller.name,
+        });
+      }
+
       return; // mientras un rival controla, el bot presiona pero no "golpea".
     }
 
@@ -876,30 +896,7 @@ function updateItems(roomId, state, now) {
 // controla el balón. El misil persigue a su objetivo; al impactar, la víctima
 // suelta el balón y queda aturdida (parálisis breve, baila en el cliente).
 function updateMissiles(roomId, state, now) {
-  const controller = getController(state);
-  if (controller && now >= (controller.stunnedUntil || 0)) {
-    state.players.forEach((player) => {
-      if (!player.missileArmed || !player.team) return;
-      if (controller.team === player.team || controller.id === player.id) return;
-      player.missileArmed = false;
-      state.missileCounter += 1;
-      state.missiles.push({
-        id: `missile-${state.missileCounter}`,
-        x: round2(player.position.x),
-        z: round2(player.position.z),
-        targetId: controller.id,
-        bornAt: now,
-      });
-      io.to(roomId).emit('missileLaunched', {
-        byId: player.id,
-        byName: player.name,
-        targetId: controller.id,
-        targetName: controller.name,
-      });
-      log(`[${roomId}] ${player.name} lanza un MISIL contra ${controller.name}.`);
-    });
-  }
-
+  // Sin disparo automático: solo actualizamos misiles ya en vuelo.
   if (state.missiles.length === 0) return;
 
   for (let i = state.missiles.length - 1; i >= 0; i -= 1) {
@@ -1765,15 +1762,13 @@ io.on('connection', (socket) => {
       if (now < (player.controlLockUntil || 0)) return;
 
       const controller = getController(state);
+      let didBallAction = false;
 
       if (controller && controller.id !== player.id) {
-        // Hay un poseedor distinto: si es rival, intentar robárselo (con espacio).
         if (controller.team !== player.team) {
-          tryStealBall(currentRoomId, state, player);
+          didBallAction = tryStealBall(currentRoomId, state, player);
         }
-        // Si es compañero, no se hace nada.
       } else if (!controller) {
-        // Balón suelto: tomar control si está dentro del radio (generoso).
         const stats = getCharacterStats(player.characterType);
         const pickup = (stats.controlRadius || BALL_CONTROL_RADIUS) * PICKUP_RADIUS_BONUS;
         const toBall = state.ballPosition.subtract(player.position);
@@ -1781,6 +1776,29 @@ io.on('connection', (socket) => {
         if (toBall.lengthSquared() < pickup * pickup) {
           grantControl(state, player);
           log(`[${currentRoomId}] ${player.name} INICIA control de balón.`);
+          didBallAction = true;
+        }
+      }
+
+      // Disparo manual: rival con balón, misil armado y sin acción de balón previa (prioridad).
+      if (!didBallAction && player.missileArmed && controller && controller.team !== player.team) {
+        if (now >= (controller.stunnedUntil || 0)) {
+          player.missileArmed = false;
+          state.missileCounter += 1;
+          state.missiles.push({
+            id: `missile-${state.missileCounter}`,
+            x: round2(player.position.x),
+            z: round2(player.position.z),
+            targetId: controller.id,
+            bornAt: now,
+          });
+          io.to(currentRoomId).emit('missileLaunched', {
+            byId: player.id,
+            byName: player.name,
+            targetId: controller.id,
+            targetName: controller.name,
+          });
+          log(`[${currentRoomId}] ${player.name} dispara MISIL MANUALMENTE contra ${controller.name}.`);
         }
       }
     } else if (control === false) {
