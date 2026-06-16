@@ -9,6 +9,7 @@ import { createScoreDisplay } from './scoreDisplay';
 import { createControlEffect, BALL_CONTROL_RADIUS } from './createControlEffect';
 import { createProceduralField, FIELD_WIDTH, FIELD_HEIGHT } from './createField';
 import { createGoal } from './createGoal';
+import { upgradeMissileItemMeshes } from './updateGameState';
 
 export function createGameScene(canvas, { refs, isMobileRef, onSceneReady, onLoadComplete }) {
     const mobile = isMobileRef.current;
@@ -437,6 +438,8 @@ export function createGameScene(canvas, { refs, isMobileRef, onSceneReady, onLoa
         BABYLON.SceneLoader.LoadAssetContainerAsync('/models/', 'missile.glb', scene).then((container) => {
             container.animationGroups.forEach((ag) => { ag.stop(); ag.reset(); });
             refs.missileContainerRef.current = container;
+            // Si los ítems misil aparecieron antes de cargar el GLB, recrearlos como pez.
+            upgradeMissileItemMeshes(refs.itemsRef);
         }).catch((error) => {
             console.error('Error cargando modelo del misil:', error);
         });

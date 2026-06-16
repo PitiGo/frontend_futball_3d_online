@@ -10,7 +10,25 @@ function staminaColor(fraction) {
   return 'linear-gradient(90deg, #ef4444, #fca5a5)';
 }
 
-const MISSILE_GLB_SCALE = 1;
+const MISSILE_GLB_SCALE = 1.5;
+
+function createItemPolyhedron(scene, id, isMissile) {
+  const mesh = BABYLON.MeshBuilder.CreatePolyhedron(
+    `item-${id}`,
+    { type: isMissile ? 2 : 1, size: 0.45 },
+    scene,
+  );
+  const mat = new BABYLON.StandardMaterial(`itemMat-${id}`, scene);
+  const color = isMissile
+    ? new BABYLON.Color3(1, 0.45, 0.15)
+    : new BABYLON.Color3(0.2, 0.9, 1);
+  mat.emissiveColor = color;
+  mat.diffuseColor = color;
+  mat.specularColor = new BABYLON.Color3(0, 0, 0);
+  mat.disableLighting = true;
+  mesh.material = mat;
+  return mesh;
+}
 
 function disposeMeshOrNode(mesh) {
   if (!mesh) return;
@@ -25,16 +43,36 @@ function disposeMeshOrNode(mesh) {
 }
 
 function instantiateMissileModel(container, scene, idSuffix, scale = MISSILE_GLB_SCALE) {
-  const instanced = container.instantiateModelsToScene(
-    (name) => `${name}-${idSuffix}`,
-    false,
-    { doNotInstantiate: true },
-  );
-  const root = new BABYLON.TransformNode(`missile-root-${idSuffix}`, scene);
-  instanced.rootNodes[0].parent = root;
-  root.instancedData = instanced;
-  root.scaling = new BABYLON.Vector3(scale, scale, scale);
-  return root;
+  try {
+    if (!container) return null;
+    const instanced = container.instantiateModelsToScene(
+      (name) => `${name}-${idSuffix}`,
+      false,
+      { doNotInstantiate: true },
+    );
+    if (!instanced.rootNodes?.[0]) return null;
+    const root = new BABYLON.TransformNode(`missile-root-${idSuffix}`, scene);
+    instanced.rootNodes[0].parent = root;
+    root.instancedData = instanced;
+    root.scaling = new BABYLON.Vector3(scale, scale, scale);
+    root._isMissileGlb = true;
+    return root;
+  } catch (error) {
+    console.error('Error instanciando modelo del misil:', error);
+    return null;
+  }
+}
+
+/** Reemplaza placeholders (octaedro) por el GLB cuando termina de cargar. */
+export function upgradeMissileItemMeshes(itemsRef) {
+  if (!itemsRef?.current) return;
+  Object.keys(itemsRef.current).forEach((id) => {
+    const mesh = itemsRef.current[id];
+    if (mesh?._isMissileItem && !mesh?._isMissileGlb) {
+      disposeMeshOrNode(mesh);
+      delete itemsRef.current[id];
+    }
+  });
 }
 
 export function createUpdateGameState(refs) {
@@ -315,22 +353,11 @@ export function createUpdateGameState(refs) {
 
           if (isMissile && missileContainerRef?.current) {
             mesh = instantiateMissileModel(missileContainerRef.current, scene, `item-${it.id}`);
-          } else {
-            mesh = BABYLON.MeshBuilder.CreatePolyhedron(
-              `item-${it.id}`,
-              { type: isMissile ? 2 : 1, size: 0.45 },
-              scene,
-            );
-            const mat = new BABYLON.StandardMaterial(`itemMat-${it.id}`, scene);
-            const color = isMissile
-              ? new BABYLON.Color3(1, 0.45, 0.15)
-              : new BABYLON.Color3(0.2, 0.9, 1);
-            mat.emissiveColor = color;
-            mat.diffuseColor = color;
-            mat.specularColor = new BABYLON.Color3(0, 0, 0);
-            mat.disableLighting = true;
-            mesh.material = mat;
           }
+          if (!mesh) {
+            mesh = createItemPolyhedron(scene, it.id, isMissile);
+          }
+          mesh._isMissileItem = isMissile;
 
           mesh.isPickable = false;
           itemsRef.current[it.id] = mesh;
@@ -356,7 +383,8 @@ export function createUpdateGameState(refs) {
         if (!mesh) {
           if (missileContainerRef?.current) {
             mesh = instantiateMissileModel(missileContainerRef.current, scene, `flying-${m.id}`);
-          } else {
+          }
+          if (!mesh) {
             mesh = BABYLON.MeshBuilder.CreateSphere(`missile-${m.id}`, { diameter: 0.4, segments: 8 }, scene);
             const mat = new BABYLON.StandardMaterial(`missileMat-${m.id}`, scene);
             mat.emissiveColor = new BABYLON.Color3(1, 0.3, 0.1);

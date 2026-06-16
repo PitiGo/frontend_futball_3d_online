@@ -745,6 +745,42 @@ function updateBotAI(roomId, state) {
       return;
     }
 
+    // Disparo de misil del bot en cualquier momento (2% por tick).
+    if (bot.missileArmed && Math.random() < 0.02) {
+      let closestOpponent = null;
+      let minDistanceSq = Infinity;
+
+      state.players.forEach((p) => {
+        if (p.team && p.team !== bot.team && now >= (p.stunnedUntil || 0)) {
+          const dx = p.position.x - bot.position.x;
+          const dz = p.position.z - bot.position.z;
+          const distSq = dx * dx + dz * dz;
+          if (distSq < minDistanceSq) {
+            minDistanceSq = distSq;
+            closestOpponent = p;
+          }
+        }
+      });
+
+      if (closestOpponent) {
+        bot.missileArmed = false;
+        state.missileCounter += 1;
+        state.missiles.push({
+          id: `missile-${state.missileCounter}`,
+          x: round2(bot.position.x),
+          z: round2(bot.position.z),
+          targetId: closestOpponent.id,
+          bornAt: now,
+        });
+        io.to(roomId).emit('missileLaunched', {
+          byId: bot.id,
+          byName: bot.name,
+          targetId: closestOpponent.id,
+          targetName: closestOpponent.name,
+        });
+      }
+    }
+
     const toBallX = ball.x - bot.position.x;
     const toBallZ = ball.z - bot.position.z;
     const dist = Math.hypot(toBallX, toBallZ);
@@ -780,25 +816,6 @@ function updateBotAI(roomId, state) {
         state.ballVelocity.set((toBallX / len) * 4, 0, (toBallZ / len) * 4);
         io.to(roomId).emit('ballSteal', { byId: bot.id, fromId: controller.id, x: round2(ball.x), z: round2(ball.z) });
         metrics.ballStealsTotal.inc({ room: roomId, by: 'bot' });
-      }
-
-      // Disparo manual del bot: reacción probabilística mientras un rival controla el balón.
-      if (bot.missileArmed && now >= (controller.stunnedUntil || 0) && Math.random() < 0.05) {
-        bot.missileArmed = false;
-        state.missileCounter += 1;
-        state.missiles.push({
-          id: `missile-${state.missileCounter}`,
-          x: round2(bot.position.x),
-          z: round2(bot.position.z),
-          targetId: controller.id,
-          bornAt: now,
-        });
-        io.to(roomId).emit('missileLaunched', {
-          byId: bot.id,
-          byName: bot.name,
-          targetId: controller.id,
-          targetName: controller.name,
-        });
       }
 
       return; // mientras un rival controla, el bot presiona pero no "golpea".
@@ -892,9 +909,8 @@ function updateItems(roomId, state, now) {
 }
 
 // --- Misiles teledirigidos ---
-// Lanzamiento automático: cualquier jugador armado dispara en cuanto un RIVAL
-// controla el balón. El misil persigue a su objetivo; al impactar, la víctima
-// suelta el balón y queda aturdida (parálisis breve, baila en el cliente).
+// Disparo manual (ballControl / IA bot): persigue al rival más cercano.
+// Al impactar, la víctima pierde el balón (si lo tenía) y queda aturdida.
 function updateMissiles(roomId, state, now) {
   // Sin disparo automático: solo actualizamos misiles ya en vuelo.
   if (state.missiles.length === 0) return;
@@ -1509,7 +1525,7 @@ io.on('connection', (socket) => {
       boosted: false,         // Boost de velocidad activo (tras recoger un ítem)
       isSprinting: false,     // Estado real de boost (resuelto en física), para visuales
       stunnedUntil: 0,        // Aturdido por misil hasta este timestamp (no se mueve ni controla)
-      missileArmed: false,    // Lleva un misil listo para dispararse contra el rival con balón
+      missileArmed: false,    // Lleva un misil listo para dispararse contra el rival más cercano
       goals: 0,               // Goles anotados en el partido actual
       roomId: roomId // Referencia a su sala
     };
@@ -1780,25 +1796,40 @@ io.on('connection', (socket) => {
         }
       }
 
-      // Disparo manual: rival con balón, misil armado y sin acción de balón previa (prioridad).
-      if (!didBallAction && player.missileArmed && controller && controller.team !== player.team) {
-        if (now >= (controller.stunnedUntil || 0)) {
+      // Disparo manual: misil armado, sin acción de balón previa → rival más cercano.
+      if (!didBallAction && player.missileArmed) {
+        let closestOpponent = null;
+        let minDistanceSq = Infinity;
+
+        state.players.forEach((p) => {
+          if (p.team && p.team !== player.team && now >= (p.stunnedUntil || 0)) {
+            const dx = p.position.x - player.position.x;
+            const dz = p.position.z - player.position.z;
+            const distSq = dx * dx + dz * dz;
+            if (distSq < minDistanceSq) {
+              minDistanceSq = distSq;
+              closestOpponent = p;
+            }
+          }
+        });
+
+        if (closestOpponent) {
           player.missileArmed = false;
           state.missileCounter += 1;
           state.missiles.push({
             id: `missile-${state.missileCounter}`,
             x: round2(player.position.x),
             z: round2(player.position.z),
-            targetId: controller.id,
+            targetId: closestOpponent.id,
             bornAt: now,
           });
           io.to(currentRoomId).emit('missileLaunched', {
             byId: player.id,
             byName: player.name,
-            targetId: controller.id,
-            targetName: controller.name,
+            targetId: closestOpponent.id,
+            targetName: closestOpponent.name,
           });
-          log(`[${currentRoomId}] ${player.name} dispara MISIL MANUALMENTE contra ${controller.name}.`);
+          log(`[${currentRoomId}] ${player.name} dispara MISIL MANUALMENTE contra ${closestOpponent.name}.`);
         }
       }
     } else if (control === false) {
