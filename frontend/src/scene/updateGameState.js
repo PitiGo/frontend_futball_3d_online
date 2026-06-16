@@ -10,6 +10,33 @@ function staminaColor(fraction) {
   return 'linear-gradient(90deg, #ef4444, #fca5a5)';
 }
 
+const MISSILE_GLB_SCALE = 0.5;
+
+function disposeMeshOrNode(mesh) {
+  if (!mesh) return;
+  if (mesh.instancedData) {
+    mesh.instancedData.rootNodes?.forEach((n) => n.dispose(false, false));
+    mesh.instancedData.animationGroups?.forEach((ag) => ag.dispose());
+    mesh.instancedData.skeletons?.forEach((s) => s.dispose());
+  } else if (mesh.material) {
+    mesh.material.dispose();
+  }
+  mesh.dispose();
+}
+
+function instantiateMissileModel(container, scene, idSuffix, scale = MISSILE_GLB_SCALE) {
+  const instanced = container.instantiateModelsToScene(
+    (name) => `${name}-${idSuffix}`,
+    false,
+    { doNotInstantiate: true },
+  );
+  const root = new BABYLON.TransformNode(`missile-root-${idSuffix}`, scene);
+  instanced.rootNodes[0].parent = root;
+  root.instancedData = instanced;
+  root.scaling = new BABYLON.Vector3(scale, scale, scale);
+  return root;
+}
+
 export function createUpdateGameState(refs) {
   const {
     sceneReadyRef,
@@ -35,6 +62,7 @@ export function createUpdateGameState(refs) {
     fxRef,
     missilesRef,
     missileIndicatorRef,
+    missileContainerRef,
   } = refs;
 
   // Tracks players whose mesh is being created asynchronously, to avoid
@@ -284,21 +312,26 @@ export function createUpdateGameState(refs) {
         let mesh = itemsRef.current[it.id];
         if (!mesh) {
           const isMissile = it.type === 'missile';
-          // Power-ups: octaedro cian (velocidad) o pincho naranja/rojo (misil).
-          mesh = BABYLON.MeshBuilder.CreatePolyhedron(
-            `item-${it.id}`,
-            { type: isMissile ? 2 : 1, size: 0.45 },
-            scene,
-          );
-          const mat = new BABYLON.StandardMaterial(`itemMat-${it.id}`, scene);
-          const color = isMissile
-            ? new BABYLON.Color3(1, 0.45, 0.15)
-            : new BABYLON.Color3(0.2, 0.9, 1);
-          mat.emissiveColor = color;
-          mat.diffuseColor = color;
-          mat.specularColor = new BABYLON.Color3(0, 0, 0);
-          mat.disableLighting = true;
-          mesh.material = mat;
+
+          if (isMissile && missileContainerRef?.current) {
+            mesh = instantiateMissileModel(missileContainerRef.current, scene, `item-${it.id}`);
+          } else {
+            mesh = BABYLON.MeshBuilder.CreatePolyhedron(
+              `item-${it.id}`,
+              { type: isMissile ? 2 : 1, size: 0.45 },
+              scene,
+            );
+            const mat = new BABYLON.StandardMaterial(`itemMat-${it.id}`, scene);
+            const color = isMissile
+              ? new BABYLON.Color3(1, 0.45, 0.15)
+              : new BABYLON.Color3(0.2, 0.9, 1);
+            mat.emissiveColor = color;
+            mat.diffuseColor = color;
+            mat.specularColor = new BABYLON.Color3(0, 0, 0);
+            mat.disableLighting = true;
+            mesh.material = mat;
+          }
+
           mesh.isPickable = false;
           itemsRef.current[it.id] = mesh;
         }
@@ -306,11 +339,7 @@ export function createUpdateGameState(refs) {
       });
       Object.keys(itemsRef.current).forEach((id) => {
         if (!activeIds.has(id)) {
-          const mesh = itemsRef.current[id];
-          if (mesh) {
-            if (mesh.material) mesh.material.dispose();
-            mesh.dispose();
-          }
+          disposeMeshOrNode(itemsRef.current[id]);
           delete itemsRef.current[id];
         }
       });
@@ -325,27 +354,27 @@ export function createUpdateGameState(refs) {
         activeIds.add(m.id);
         let mesh = missilesRef.current[m.id];
         if (!mesh) {
-          mesh = BABYLON.MeshBuilder.CreateSphere(`missile-${m.id}`, { diameter: 0.4, segments: 8 }, scene);
-          const mat = new BABYLON.StandardMaterial(`missileMat-${m.id}`, scene);
-          mat.emissiveColor = new BABYLON.Color3(1, 0.3, 0.1);
-          mat.diffuseColor = new BABYLON.Color3(1, 0.3, 0.1);
-          mat.specularColor = new BABYLON.Color3(0, 0, 0);
-          mat.disableLighting = true;
-          mesh.material = mat;
+          if (missileContainerRef?.current) {
+            mesh = instantiateMissileModel(missileContainerRef.current, scene, `flying-${m.id}`);
+          } else {
+            mesh = BABYLON.MeshBuilder.CreateSphere(`missile-${m.id}`, { diameter: 0.4, segments: 8 }, scene);
+            const mat = new BABYLON.StandardMaterial(`missileMat-${m.id}`, scene);
+            mat.emissiveColor = new BABYLON.Color3(1, 0.3, 0.1);
+            mat.diffuseColor = new BABYLON.Color3(1, 0.3, 0.1);
+            mat.specularColor = new BABYLON.Color3(0, 0, 0);
+            mat.disableLighting = true;
+            mesh.material = mat;
+          }
+
           mesh.isPickable = false;
           mesh.position.set(m.x, 1.0, m.z);
           missilesRef.current[m.id] = mesh;
         }
-        // El bucle de render interpola hacia este objetivo a 60 fps (como balón/jugadores).
         mesh.netTarget = { x: m.x, y: 1.0, z: m.z };
       });
       Object.keys(missilesRef.current).forEach((id) => {
         if (!activeIds.has(id)) {
-          const mesh = missilesRef.current[id];
-          if (mesh) {
-            if (mesh.material) mesh.material.dispose();
-            mesh.dispose();
-          }
+          disposeMeshOrNode(missilesRef.current[id]);
           delete missilesRef.current[id];
         }
       });

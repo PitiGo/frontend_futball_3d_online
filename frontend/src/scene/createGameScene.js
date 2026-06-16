@@ -433,6 +433,14 @@ export function createGameScene(canvas, { refs, isMobileRef, onSceneReady, onLoa
             console.error('Error cargando modelo del balón:', error);
         });
 
+        // Precarga del misil (AssetContainer): se instancia por ítem y por misil en vuelo.
+        BABYLON.SceneLoader.LoadAssetContainerAsync('/models/', 'missile.glb', scene).then((container) => {
+            container.animationGroups.forEach((ag) => { ag.stop(); ag.reset(); });
+            refs.missileContainerRef.current = container;
+        }).catch((error) => {
+            console.error('Error cargando modelo del misil:', error);
+        });
+
         // --- SOMBRAS "BLOB" (discos suaves bajo jugadores y balón) ---
         // Sin shadow maps (caros): un disco con gradiente radial ancla visualmente
         // a los personajes y al balón al suelo, mejorando la percepción de profundidad.
@@ -630,15 +638,23 @@ export function createGameScene(canvas, { refs, isMobileRef, onSceneReady, onLoa
             }
             if (refs.ballRef.current) interpolateNet(refs.ballRef.current, smooth);
 
-            // Misiles: interpolar hacia el último estado del servidor + pulso visual.
+            // Misiles en vuelo: apuntar hacia su dirección e interpolar posición.
             const missileMeshes = refs.missilesRef?.current;
             if (missileMeshes) {
-                const pulse = 1 + 0.25 * Math.sin(performance.now() * 0.02);
                 for (const id in missileMeshes) {
                     const m = missileMeshes[id];
                     if (!m) continue;
+
+                    if (m.netTarget) {
+                        const dx = m.netTarget.x - m.position.x;
+                        const dz = m.netTarget.z - m.position.z;
+                        if (dx * dx + dz * dz > 0.001) {
+                            const targetAngle = Math.atan2(dx, dz);
+                            m.rotation.y = BABYLON.Scalar.LerpAngle(m.rotation.y, targetAngle, 0.2);
+                        }
+                    }
+
                     interpolateNet(m, smooth);
-                    m.scaling.set(pulse, pulse, pulse);
                 }
             }
 

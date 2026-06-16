@@ -76,6 +76,7 @@ const Game = () => {
     const fxRef = useRef(null); // Efectos de escena: sacudida de cámara, ráfagas de partículas
     const missilesRef = useRef({}); // Mallas de misiles teledirigidos en vuelo
     const missileIndicatorRef = useRef(null); // Badge 🚀 cuando llevas un misil armado
+    const missileContainerRef = useRef(null); // AssetContainer del modelo missile.glb
 
     const [showingEndMessage, setShowingEndMessage] = useState(false);
 
@@ -231,6 +232,7 @@ const Game = () => {
         fxRef,
         missilesRef,
         missileIndicatorRef,
+        missileContainerRef,
     }), [setConnectedPlayers]);
 
     const onSceneReady = useCallback(() => setSceneReady(true), []);
