@@ -15,6 +15,7 @@ import { useScene } from '../hooks/useScene';
 import { useGameSocket } from '../hooks/useGameSocket';
 import { useDeviceLayout } from '../hooks/useDeviceLayout';
 import { initAudio, playGoal, playCrowdCheer, playWhistle, playBounce, playItem, playTackle, playMissileLaunch, playExplosion, toggleMuted, isMuted } from '../services/sound';
+import { beginPredictedRelease } from '../scene/predictBallRelease';
 
 const MAX_CHAT_MESSAGES = 50;
 
@@ -83,6 +84,8 @@ const Game = () => {
     const passLabelTextRef = useRef('PASS');
     const wantsControlRef = useRef(false);
     const controllingPlayerIdRef = useRef(null);
+    const releaseIntentRef = useRef(null);
+    const predictedKickRef = useRef({ active: false });
 
     const [showingEndMessage, setShowingEndMessage] = useState(false);
 
@@ -197,12 +200,32 @@ const Game = () => {
     const chatMessagesRef = useRef(null);
     const [isMobileChatExpanded, setIsMobileChatExpanded] = useState(false);
 
+    const predictLocalRelease = useCallback(() => {
+        beginPredictedRelease({
+            predictedKickRef,
+            releaseIntentRef,
+            controllingPlayerIdRef,
+            ballRef,
+            playersRef,
+            playerMetaRef,
+            socketId: socketRef.current?.id,
+            fxRef,
+            chargeContainerRef,
+            controlEffectsRef,
+        });
+    }, []);
+
+    const handleBallControlChange = useCallback((control) => {
+        if (!control) predictLocalRelease();
+    }, [predictLocalRelease]);
+
     const { handleDirectionChange, resetMovement } = useControls({
         socketRef,
         gameStarted,
         isConnected,
         chatInputFocusRef,
         wantsControlRef,
+        onBallControlChange: handleBallControlChange,
     });
 
     const handleToggleReady = useCallback(() => {
@@ -242,6 +265,8 @@ const Game = () => {
         passLabelTextRef,
         wantsControlRef,
         controllingPlayerIdRef,
+        releaseIntentRef,
+        predictedKickRef,
     }), [setConnectedPlayers]);
 
     const onSceneReady = useCallback(() => setSceneReady(true), []);
@@ -495,7 +520,8 @@ const Game = () => {
         resetMovement();
         socketRef.current?.volatile.emit('playerMove', { x: 0, z: 0 });
         socketRef.current?.emit('ballControl', { control: false });
-    }, [mobilePortraitBlocked, resetMovement]);
+        handleBallControlChange(false);
+    }, [mobilePortraitBlocked, resetMovement, handleBallControlChange]);
 
     // Añadir también un useEffect para manejar la visibilidad de la página
     useEffect(() => {
@@ -985,6 +1011,7 @@ const Game = () => {
                                             // Non-volatile: possession events must reach the server reliably.
                                             socketRef.current.emit('ballControl', { control });
                                         }
+                                        handleBallControlChange(control);
                                     }}
                                 />
                         )}

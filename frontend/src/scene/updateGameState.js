@@ -2,6 +2,7 @@ import * as BABYLON from '@babylonjs/core';
 import * as GUI from '@babylonjs/gui';
 import { getPlayerVisualY } from '../constants/characterStats';
 import { playKick } from '../services/sound';
+import { reconcilePredictedRelease } from './predictBallRelease';
 
 // Stamina bar colors by remaining fraction.
 function staminaColor(fraction) {
@@ -103,6 +104,8 @@ export function createUpdateGameState(refs) {
     missileContainerRef,
     passLabelTextRef,
     controllingPlayerIdRef,
+    releaseIntentRef,
+    predictedKickRef,
   } = refs;
 
   // Tracks players whose mesh is being created asynchronously, to avoid
@@ -135,8 +138,36 @@ export function createUpdateGameState(refs) {
     } = gameState;
     const isMobileView = isMobileRef.current;
 
+    const selfId = socketRef.current?.id || null;
+    const predicted = predictedKickRef?.current;
+    const predicting = !!predicted?.active
+      && reconcilePredictedRelease(predicted, {
+        selfId,
+        controllingPlayerId,
+        ballPosition,
+      });
+
     if (controllingPlayerIdRef) {
-      controllingPlayerIdRef.current = controllingPlayerId || null;
+      // Durante la predicción ignoramos paquetes viejos que aún nos marcan como portadores.
+      if (predicting && controllingPlayerId === selfId) {
+        controllingPlayerIdRef.current = null;
+      } else {
+        controllingPlayerIdRef.current = controllingPlayerId || null;
+      }
+    }
+
+    // Intención de disparo/pase para predicción local al soltar.
+    if (releaseIntentRef) {
+      if (selfId && controllingPlayerId === selfId && releaseDirection) {
+        releaseIntentRef.current = {
+          direction: { x: releaseDirection.x, z: releaseDirection.z },
+          shotCharge: typeof shotCharge === 'number' ? shotCharge : 0,
+          passTargetId: passTargetId || null,
+          characterType: playerMetaRef.current[selfId]?.characterType || 'player',
+        };
+      } else if (!predicting) {
+        releaseIntentRef.current = null;
+      }
     }
 
     // Match timer: push to React state only when the whole second changes
@@ -308,7 +339,11 @@ export function createUpdateGameState(refs) {
       });
     }
 
-    if (ballPosition) {
+    if (predicting && predicted) {
+      // Evita un segundo SFX de chute al terminar la predicción.
+      prevBallPos = { x: predicted.x, z: predicted.z };
+      prevBallStep = 1;
+    } else if (ballPosition) {
       // Detect a sudden jump in the ball's authoritative step (shot/strong hit) → kick SFX.
       if (prevBallPos) {
         const dx = ballPosition.x - prevBallPos.x;
@@ -328,7 +363,10 @@ export function createUpdateGameState(refs) {
       prevBallPos = { x: ballPosition.x, z: ballPosition.z };
     }
 
-    if (ballRef.current && ballPosition) {
+    if (ballRef.current && predicting && predicted) {
+      // La predicción manda la posición visual; el render loop la integra.
+      ballRef.current.netTarget = { x: predicted.x, y: predicted.y, z: predicted.z };
+    } else if (ballRef.current && ballPosition) {
       const currentPosition = ballRef.current.position;
       const targetPosition = new BABYLON.Vector3(
         ballPosition.x,
@@ -422,14 +460,17 @@ export function createUpdateGameState(refs) {
     }
 
     if (controlEffectsRef.current && ballRef.current) {
-      const hasControl = !!controllingPlayerId && controlRemainingMs > 0;
-      const controllingName = playerMetaRef.current[controllingPlayerId]?.name || '';
+      const effectiveController = (predicting && controllingPlayerId === selfId)
+        ? null
+        : controllingPlayerId;
+      const hasControl = !!effectiveController && controlRemainingMs > 0 && !predicting;
+      const controllingName = playerMetaRef.current[effectiveController]?.name || '';
       controlEffectsRef.current.ballHalo.isVisible = hasControl;
       controlEffectsRef.current.controlRing.isVisible = hasControl;
       controlEffectsRef.current.controlTimeText.isVisible = hasControl;
       controlEffectsRef.current.controlPlayerNameText.isVisible = hasControl;
       if (hasControl) {
-        const controllingMesh = playersRef.current[controllingPlayerId];
+        const controllingMesh = playersRef.current[effectiveController];
         if (controllingMesh) {
           controlEffectsRef.current.controlRing.position = controllingMesh.position.clone();
           controlEffectsRef.current.controlRing.position.y = 0.1;
@@ -456,8 +497,8 @@ export function createUpdateGameState(refs) {
     // estos elementos a 60 fps; aquí solo actualizamos intención y visibilidad.
     if (controlEffectsRef.current) {
       const effects = controlEffectsRef.current;
-      const selfId = socketRef.current?.id;
-      const localHasControl = !!selfId
+      const localHasControl = !predicting
+        && !!selfId
         && controllingPlayerId === selfId
         && releaseDirection
         && Number.isFinite(releaseDirection.x)
@@ -490,7 +531,6 @@ export function createUpdateGameState(refs) {
 
     // Update local player's stamina bar (direct DOM write to avoid 20Hz React re-renders).
     if (staminaFillRef?.current && staminaContainerRef?.current) {
-      const selfId = socketRef.current?.id;
       const self = selfId && Array.isArray(players)
         ? players.find((p) => p.id === selfId)
         : null;
@@ -513,8 +553,7 @@ export function createUpdateGameState(refs) {
 
     // Update local player's shot charge bar (visible only while controlling the ball).
     if (chargeFillRef?.current && chargeContainerRef?.current) {
-      const selfId = socketRef.current?.id;
-      if (selfId && controllingPlayerId === selfId) {
+      if (!predicting && selfId && controllingPlayerId === selfId) {
         const fraction = Math.max(0, Math.min(1, typeof shotCharge === 'number' ? shotCharge : 0));
         chargeContainerRef.current.style.display = 'block';
         chargeFillRef.current.style.width = `${(fraction * 100).toFixed(1)}%`;

@@ -17,6 +17,7 @@ import {
 import { createProceduralField, FIELD_WIDTH, FIELD_HEIGHT } from './createField';
 import { createGoal } from './createGoal';
 import { upgradeMissileItemMeshes } from './updateGameState';
+import { stepPredictedRelease } from './predictBallRelease';
 
 export function createGameScene(canvas, { refs, isMobileRef, onSceneReady, onLoadComplete }) {
     const mobile = isMobileRef.current;
@@ -678,7 +679,29 @@ export function createGameScene(canvas, { refs, isMobileRef, onSceneReady, onLoa
             if (players) {
                 for (const id in players) interpolateNet(players[id], smooth);
             }
-            if (refs.ballRef.current) interpolateNet(refs.ballRef.current, smooth);
+
+            // Predicción local del disparo: el balón sale al soltar sin esperar el RTT.
+            const predicted = refs.predictedKickRef?.current;
+            const ballMesh = refs.ballRef.current;
+            if (predicted?.active && ballMesh) {
+                stepPredictedRelease(predicted, netDt);
+                if (predicted.active) {
+                    ballMesh.position.set(predicted.x, predicted.y, predicted.z);
+                    ballMesh.netTarget = { x: predicted.x, y: predicted.y, z: predicted.z };
+                    const speed = Math.hypot(predicted.vx, predicted.vz);
+                    if (speed > 0.05) {
+                        const axis = BABYLON.Vector3.Cross(
+                            BABYLON.Vector3.Up(),
+                            new BABYLON.Vector3(predicted.vx, 0, predicted.vz).normalize(),
+                        );
+                        ballMesh.rotate(axis, speed * netDt * 2.2, BABYLON.Space.WORLD);
+                    }
+                } else {
+                    interpolateNet(ballMesh, smooth);
+                }
+            } else if (ballMesh) {
+                interpolateNet(ballMesh, smooth);
+            }
 
             // Misiles en vuelo: apuntar hacia su dirección e interpolar posición.
             const missileMeshes = refs.missilesRef?.current;
