@@ -15,6 +15,7 @@ export function useControls({ socketRef, gameStarted, isConnected, chatInputFocu
   const joystickMoveRef = useRef({ x: 0, z: 0 });
   const lastEmittedMoveRef = useRef({ x: 0, z: 0 });
   const lastEmitTimeRef = useRef(0);
+  const spaceHeldRef = useRef(false);
   const gameStartedRef = useRef(gameStarted);
 
   useEffect(() => {
@@ -98,6 +99,9 @@ export function useControls({ socketRef, gameStarted, isConnected, chatInputFocu
           if (!keysPressed.current.right) { keysPressed.current.right = true; keyChanged = true; }
           break;
         case ' ':
+          // Edge-trigger: ignore key-repeat (~15–30/s) to avoid flooding reliable ballControl.
+          if (e.repeat || spaceHeldRef.current) break;
+          spaceHeldRef.current = true;
           if (wantsControlRef) wantsControlRef.current = true;
           // ballControl must stay non-volatile — possession start/end must not be dropped.
           socketRef.current.emit('ballControl', { control: true });
@@ -107,7 +111,7 @@ export function useControls({ socketRef, gameStarted, isConnected, chatInputFocu
       }
       if (keyChanged) sendMovement();
     },
-    [chatInputFocusRef, isConnected, sendMovement, socketRef]
+    [chatInputFocusRef, isConnected, sendMovement, socketRef, wantsControlRef]
   );
 
   const handleKeyUp = useCallback(
@@ -134,6 +138,8 @@ export function useControls({ socketRef, gameStarted, isConnected, chatInputFocu
           if (keysPressed.current.right) { keysPressed.current.right = false; keyChanged = true; }
           break;
         case ' ':
+          if (!spaceHeldRef.current) break;
+          spaceHeldRef.current = false;
           if (wantsControlRef) wantsControlRef.current = false;
           // ballControl must stay non-volatile — possession start/end must not be dropped.
           socketRef.current.emit('ballControl', { control: false });
@@ -143,7 +149,7 @@ export function useControls({ socketRef, gameStarted, isConnected, chatInputFocu
       }
       if (keyChanged) sendMovement();
     },
-    [chatInputFocusRef, isConnected, sendMovement, socketRef]
+    [chatInputFocusRef, isConnected, sendMovement, socketRef, wantsControlRef]
   );
 
   useEffect(() => {
@@ -162,6 +168,7 @@ export function useControls({ socketRef, gameStarted, isConnected, chatInputFocu
   const resetMovement = useCallback(() => {
     keysPressed.current = { up: false, down: false, left: false, right: false };
     joystickMoveRef.current = { x: 0, z: 0 };
+    spaceHeldRef.current = false;
     if (wantsControlRef) wantsControlRef.current = false;
   }, [wantsControlRef]);
 

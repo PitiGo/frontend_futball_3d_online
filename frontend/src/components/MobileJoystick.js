@@ -44,8 +44,17 @@ const MobileJoystick = ({ onDirectionChange, onBallControlChange }) => {
         return () => window.removeEventListener('resize', updateSizes);
     }, []);
 
+    // Throttle real (~20 Hz): evita saturar useControls/socket en touchmove a 60+ Hz.
+    const lastJoystickEmitRef = useRef(0);
+    const JOYSTICK_EMIT_MIN_MS = 50;
     const throttleEmit = useCallback((vector) => {
-        onDirectionChange && onDirectionChange(vector);
+        if (!onDirectionChange) return;
+        const now = performance.now();
+        const isStop = vector.x === 0 && vector.z === 0;
+        // Parada inmediata; movimiento a ≤20 Hz.
+        if (!isStop && now - lastJoystickEmitRef.current < JOYSTICK_EMIT_MIN_MS) return;
+        lastJoystickEmitRef.current = now;
+        onDirectionChange(vector);
     }, [onDirectionChange]);
 
     const calculateVector = useCallback((deltaX, deltaY) => {

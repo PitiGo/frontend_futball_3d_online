@@ -113,6 +113,29 @@ export const itemsCollectedTotal = new client.Counter({
   registers: [register],
 });
 
+export const stateEmitsTotal = new client.Counter({
+  name: 'football_state_emits_total',
+  help: 'Emisiones de gameStateUpdate',
+  labelNames: ['room'],
+  registers: [register],
+});
+
+export const stateEmitBytes = new client.Histogram({
+  name: 'football_state_emit_bytes',
+  help: 'Tamaño serializado (UTF-8) del payload gameStateUpdate',
+  labelNames: ['room'],
+  buckets: [128, 256, 512, 1024, 2048, 4096, 8192],
+  registers: [register],
+});
+
+export const physicsTickDurationMs = new client.Histogram({
+  name: 'football_physics_tick_duration_ms',
+  help: 'Duración de updateGamePhysics por tick',
+  labelNames: ['room'],
+  buckets: [0.25, 0.5, 1, 2, 4, 8, 16, 33],
+  registers: [register],
+});
+
 // ---------------------------------------------------------------------------
 // Gauges (estado instantáneo). Se recalculan en cada scrape a partir del
 // snapshot del servidor para evitar inc/dec dispersos y propensos a errores.

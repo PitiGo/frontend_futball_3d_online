@@ -100,6 +100,7 @@ const STEAL_VICTIM_LOCK_MS = 650;  // Tras perderla, la víctima no puede recupe
 const BOT_STEAL_CHANCE = 0.18;     // Probabilidad por tick de IA (~20Hz) de que un bot en rango robe
 const BOT_STEAL_COOLDOWN_MS = 800; // Separación mínima entre intentos de robo de un bot
 const BOT_AI_EVERY_N_TICKS = 3;    // IA a ~20Hz: evita GC/lag; el movimiento se mantiene entre ticks
+const PLAYER_MOVE_MIN_MS = 40;     // Rate-limit servidor ~25 Hz (el cliente ya va a ≤20 Hz)
 const BALL_RELEASE_MIN = 13; // Minimum shot speed (quick tap)
 const BALL_RELEASE_MAX = 22; // Maximum shot speed (full charge) — reducido para que ni a máxima carga cruce todo el campo
 const PASS_RELEASE_MIN = 8;
@@ -200,7 +201,11 @@ availableSalas.forEach(roomId => {
     emitCount: 0, // Contador de emisiones para keyframes periódicos
     items: [], // Ítems activos en la cancha: { id, type, x, z }
     itemCounter: 0, // Contador para identificar ítems
+    itemsVersion: 0, // Sube en spawn/collect: permite omitir items[] sin cambios
     lastItemSpawn: 0, // Timestamp del último spawn de ítem
+    lastEmittedScore: null, // Envelope delta: score omitido si no cambió
+    lastEmittedItemsVersion: -1,
+    lastEmittedMatchSecond: -1,
     missiles: [], // Misiles teledirigidos en vuelo: { id, x, z, targetId, bornAt }
     missileCounter: 0, // Contador para identificar misiles
   };
@@ -268,8 +273,9 @@ function quaternionToObject(q) { return q ? { x: q.x, y: q.y, z: q.z, w: q.w } :
 // Network payload optimization: 2-decimal precision (cm-level on a 40x30 pitch)
 // shrinks each float's JSON length. Sent 20x/sec per player, this adds up.
 function round2(n) { return Math.round(n * 100) / 100; }
-function vector3ToNetObject(v) {
-  return v ? { x: round2(v.x), y: round2(v.y), z: round2(v.z) } : { x: 0, y: 0, z: 0 };
+/** XZ only — Y is constant on the pitch (client reconstructs ball/player height). */
+function vectorXZToNetObject(v) {
+  return v ? { x: round2(v.x), z: round2(v.z) } : { x: 0, z: 0 };
 }
 
 function getSpawnPosition(team) {
@@ -328,6 +334,7 @@ function resetPlayersPositions(roomId, state, kickoffTeam = null) {
     }
   });
   // Limpiar ítems y misiles en cada saque para que no actúen justo al reanudar.
+  if (state.items.length > 0) state.itemsVersion = (state.itemsVersion || 0) + 1;
   state.items = [];
   state.lastItemSpawn = performance.now();
   state.missiles = [];
@@ -436,7 +443,9 @@ function startGame(roomId, state) {
     state.physicsTickCount = 0;
     state.kickoffFrozenUntil = performance.now() + KICKOFF_FREEZE_MS;
     state.gameLoopInterval = setInterval(() => {
+      const tickStart = performance.now();
       updateGamePhysics(roomId, state);
+      metrics.physicsTickDurationMs.observe({ room: roomId }, performance.now() - tickStart);
       state.physicsTickCount += 1;
       if (state.physicsTickCount % EMIT_EVERY_N_TICKS === 0) {
         emitGameState(roomId, state);
@@ -522,8 +531,12 @@ function resetFullRoomState(roomId, state) {
   state.currentGameState = gameStates.WAITING;
   state.score = { left: 0, right: 0 };
   state.gameOverData = null;
+  if (state.items.length > 0) state.itemsVersion = (state.itemsVersion || 0) + 1;
   state.items = [];
   state.lastItemSpawn = 0;
+  state.lastEmittedScore = null;
+  state.lastEmittedItemsVersion = -1;
+  state.lastEmittedMatchSecond = -1;
   state.missiles = [];
   resetBall(state);
   state.readyState.left.clear();
@@ -1038,6 +1051,7 @@ function spawnItem(state) {
   }
   const type = Math.random() < MISSILE_ITEM_CHANCE ? 'missile' : 'speed';
   state.items.push({ id: `item-${state.itemCounter}`, type, x, z });
+  state.itemsVersion = (state.itemsVersion || 0) + 1;
 }
 
 // Spawn periódico y detección de recogida por jugadores.
@@ -1060,6 +1074,7 @@ function updateItems(roomId, state, now) {
       const dz = item.z - player.position.z;
       if (dx * dx + dz * dz <= reachSq) {
         state.items.splice(i, 1);
+        state.itemsVersion = (state.itemsVersion || 0) + 1;
         if (item.type === 'missile') {
           player.missileArmed = true;
         } else {
@@ -1612,10 +1627,24 @@ function playerChanged(prev, x, z, isMoving, isControllingBall, stamina, isSprin
 // Cada ~2s (40 emisiones a 20Hz) enviamos un keyframe completo para que clientes
 // recién conectados y posibles desincronizaciones se autocorrijan.
 const FULL_KEYFRAME_EVERY = 40;
-function emitGameState(roomId, state) {
+/**
+ * @param {{ targetSocket?: import('socket.io').Socket | null, forceFull?: boolean, updateDeltaCache?: boolean }} [opts]
+ * - targetSocket: emisión personal (p. ej. al unirse). No limpia el delta de la sala.
+ * - forceFull: incluir todos los jugadores + envelope completo.
+ * - updateDeltaCache: por defecto true en broadcast de sala; false en unicast al joiner.
+ */
+function emitGameState(roomId, state, opts = {}) {
+  const {
+    targetSocket = null,
+    forceFull: forceFullOpt = false,
+    updateDeltaCache = !targetSocket,
+  } = opts;
+
   // Static fields (name, team, characterType) are sent via teamUpdate / playersListUpdate.
-  state.emitCount = (state.emitCount || 0) + 1;
-  const forceFull = state.emitCount % FULL_KEYFRAME_EVERY === 0;
+  if (!targetSocket) {
+    state.emitCount = (state.emitCount || 0) + 1;
+  }
+  const forceFull = forceFullOpt || (!targetSocket && state.emitCount % FULL_KEYFRAME_EVERY === 0);
   const playersData = [];
   const roster = [];
   state.players.forEach((p) => {
@@ -1634,7 +1663,7 @@ function emitGameState(roomId, state) {
     if (forceFull || isNew || playerChanged(prev, x, z, isMoving, isControllingBall, stamina, isSprinting, stunned, missileArmed)) {
       const entry = {
         id: p.id,
-        position: vector3ToNetObject(p.position),
+        position: vectorXZToNetObject(p.position),
         isMoving,
         isControllingBall,
         stamina,
@@ -1650,11 +1679,13 @@ function emitGameState(roomId, state) {
         entry.team = p.team;
       }
       playersData.push(entry);
-      state.lastSent.set(p.id, { x, z, isMoving, isControllingBall, stamina, isSprinting, stunned, missileArmed });
+      if (updateDeltaCache) {
+        state.lastSent.set(p.id, { x, z, isMoving, isControllingBall, stamina, isSprinting, stunned, missileArmed });
+      }
     }
   });
   // Purgar del cache jugadores que ya no existen.
-  if (state.lastSent.size > state.players.size) {
+  if (updateDeltaCache && state.lastSent.size > state.players.size) {
     state.lastSent.forEach((_, id) => { if (!state.players.has(id)) state.lastSent.delete(id); });
   }
 
@@ -1680,23 +1711,53 @@ function emitGameState(roomId, state) {
     }
   });
 
+  const matchSecond = Math.max(0, Math.ceil(state.matchTimeLeftMs / 1000));
+  const scoreChanged = !state.lastEmittedScore
+    || state.lastEmittedScore.left !== state.score.left
+    || state.lastEmittedScore.right !== state.score.right;
+  const itemsChanged = forceFull || state.itemsVersion !== state.lastEmittedItemsVersion;
+  const timerChanged = forceFull || matchSecond !== state.lastEmittedMatchSecond;
+
   const gameStatePayload = {
     players: playersData,
     roster,
-    ballPosition: vector3ToNetObject(state.ballPosition),
-    score: state.score,
-    matchTimeLeftMs: Math.round(state.matchTimeLeftMs),
+    ballPosition: vectorXZToNetObject(state.ballPosition),
     controllingPlayerId,
     controlRemainingMs,
     shotCharge,
     releaseDirection,
     passTargetId,
-    items: state.items,
     missiles: state.missiles.map((m) => ({ id: m.id, x: m.x, z: m.z })),
   };
 
-  // Emitir a la sala específica
-  io.to(roomId).volatile.emit('gameStateUpdate', gameStatePayload);
+  // Envelope: omitir campos estáticos/lentos salvo keyframe o cambio real.
+  if (forceFull || scoreChanged) {
+    gameStatePayload.score = state.score;
+  }
+  if (timerChanged) {
+    gameStatePayload.matchTimeLeftMs = Math.round(state.matchTimeLeftMs);
+  }
+  if (itemsChanged) {
+    gameStatePayload.items = state.items;
+  }
+
+  if (updateDeltaCache) {
+    if (forceFull || scoreChanged) {
+      state.lastEmittedScore = { left: state.score.left, right: state.score.right };
+    }
+    if (timerChanged) state.lastEmittedMatchSecond = matchSecond;
+    if (itemsChanged) state.lastEmittedItemsVersion = state.itemsVersion || 0;
+  }
+
+  const payloadBytes = Buffer.byteLength(JSON.stringify(gameStatePayload), 'utf8');
+  metrics.stateEmitBytes.observe({ room: roomId }, payloadBytes);
+  metrics.stateEmitsTotal.inc({ room: roomId });
+
+  if (targetSocket) {
+    targetSocket.volatile.emit('gameStateUpdate', gameStatePayload);
+  } else {
+    io.to(roomId).volatile.emit('gameStateUpdate', gameStatePayload);
+  }
 }
 
 
@@ -1805,9 +1866,12 @@ io.on('connection', (socket) => {
     io.to(roomId).emit('playersListUpdate', Array.from(state.players.values()).map(p => ({
       id: p.id, name: p.name, team: p.team, characterType: p.characterType
     })));
-    // Forzar envío completo (keyframe) para que el nuevo cliente reciba todo.
-    state.lastSent.clear();
-    emitGameState(roomId, state);
+    // Keyframe solo al joiner: no invalidar el delta del resto de la sala.
+    emitGameState(roomId, state, {
+      targetSocket: socket,
+      forceFull: true,
+      updateDeltaCache: false,
+    });
 
   });
 
@@ -1994,17 +2058,24 @@ io.on('connection', (socket) => {
     // Ignorar si el jugador no existe, no tiene estado de movimiento, o el juego no está en PLAYING
     if (!movementState || !player || state.currentGameState !== gameStates.PLAYING) return;
 
-    if (moveData && typeof moveData.x === 'number' && typeof moveData.z === 'number') {
+    const now = performance.now();
+    const isStop = !moveData
+      || typeof moveData.x !== 'number'
+      || typeof moveData.z !== 'number'
+      || (moveData.x * moveData.x + moveData.z * moveData.z) < 0.001;
+    // Rate-limit ~25 Hz; la parada siempre se acepta para no dejar el stick "pegado".
+    if (!isStop && now - (player.lastMoveAt || 0) < PLAYER_MOVE_MIN_MS) return;
+    player.lastMoveAt = now;
+
+    if (!isStop) {
       // Usar y normalizar el vector recibido
       movementState.moveDirection.copyFromFloats(moveData.x, 0, moveData.z);
-      // Normalizar solo si no es el vector cero
       if (movementState.moveDirection.lengthSquared() > 0.001) {
         movementState.moveDirection.normalize();
       } else {
-        movementState.moveDirection.set(0, 0, 0); // Asegurar que sea cero si es muy pequeño
+        movementState.moveDirection.set(0, 0, 0);
       }
     } else {
-      // Si moveData es null o inválido, detener movimiento
       movementState.moveDirection.set(0, 0, 0);
     }
     // No emitimos nada aquí, el estado se envía en el bucle principal
