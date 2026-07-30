@@ -753,79 +753,81 @@ export function createGameScene(canvas, { refs, isMobileRef, onSceneReady, onLoa
             }
 
             if (refs.ballRef.current && refs.controlEffectsRef.current) {
-                refs.controlEffectsRef.current.ballHalo.position = refs.ballRef.current.position.clone();
-                refs.controlEffectsRef.current.ballHalo.rotation.y += 0.02;
+                const controlEffects = refs.controlEffectsRef.current;
+                const ballPos = refs.ballRef.current.position;
+                controlEffects.ballHalo.position.copyFrom(ballPos);
+                controlEffects.ballHalo.rotation.y += 0.02;
 
-                if (refs.controlEffectsRef.current.ballHalo.isVisible) {
-                    refs.controlEffectsRef.current.animateParticles(refs.ballRef.current.position);
+                if (controlEffects.ballHalo.isVisible) {
+                    controlEffects.animateParticles(ballPos);
                 }
 
                 const localPlayer = refs.socketRef.current?.id && refs.playersRef.current[refs.socketRef.current.id];
-                const controlEffects = refs.controlEffectsRef.current;
-                controlEffects.pickupRing.isVisible = false;
-                controlEffects.stealRing.isVisible = false;
+                const wantsControl = !!refs.wantsControlRef?.current;
+                const controllingId = refs.controllingPlayerIdRef?.current;
+                const localHasBall = !!localPlayer && controllingId === refs.socketRef.current.id;
+                const showActionRing = !!localPlayer && wantsControl && !localHasBall;
 
-                if (localPlayer) {
+                if (!showActionRing) {
+                    controlEffects.pickupRing.isVisible = false;
+                    controlEffects.stealRing.isVisible = false;
+                } else {
                     const selfId = refs.socketRef.current.id;
                     const charType = refs.playerMetaRef.current[selfId]?.characterType || 'player';
                     const localTeam = refs.playerMetaRef.current[selfId]?.team;
-                    const controllingId = refs.controllingPlayerIdRef?.current;
                     const controllerTeam = controllingId
                         ? refs.playerMetaRef.current[controllingId]?.team
                         : null;
-                    const wantsControl = !!refs.wantsControlRef?.current;
-                    const localHasBall = controllingId === selfId;
                     const rivalControls = !!controllingId
                         && controllingId !== selfId
                         && controllerTeam
                         && localTeam
                         && controllerTeam !== localTeam;
-                    const looseBall = !controllingId;
 
-                    if (wantsControl && !localHasBall && refs.ballRef.current) {
-                        const dx = refs.ballRef.current.position.x - localPlayer.position.x;
-                        const dz = refs.ballRef.current.position.z - localPlayer.position.z;
-                        const distSq = dx * dx + dz * dz;
-
-                        if (rivalControls) {
-                            const controllerMesh = refs.playersRef.current[controllingId];
-                            const controllerType = refs.playerMetaRef.current[controllingId]?.characterType || 'player';
-                            const ballPos = refs.ballRef.current.position;
-                            const controllerPos = controllerMesh?.position || ballPos;
-                            const inStealRange = !!controllerMesh && isWithinStealReach(
-                                localPlayer.position,
-                                charType,
-                                controllerPos,
-                                controllerType,
-                                ballPos,
-                            );
-                            const behind = isStealerBehindController(
-                                localPlayer.position,
-                                controllerPos,
-                                ballPos,
-                            );
-                            const tackleReach = getTackleReach(charType, controllerType)
-                              * (behind ? STEAL_BEHIND_PENALTY : 1);
-                            controlEffects.stealRing.position.copyFrom(localPlayer.position);
-                            controlEffects.stealRing.position.y = 0.06;
-                            controlEffects.setActionRing(
-                                controlEffects.stealRing,
-                                tackleReach,
-                                inStealRange,
-                            );
-                            controlEffects.stealRing.isVisible = true;
-                            controlEffects.stealRing.rotation.y += 0.03;
-                        } else if (looseBall) {
-                            const pickupRadius = getPickupRadius(charType);
-                            controlEffects.pickupRing.position.copyFrom(localPlayer.position);
-                            controlEffects.pickupRing.position.y = 0.05;
-                            controlEffects.setActionRing(
-                                controlEffects.pickupRing,
-                                pickupRadius,
-                                distSq <= pickupRadius * pickupRadius,
-                            );
-                            controlEffects.pickupRing.isVisible = true;
-                        }
+                    if (rivalControls) {
+                        const controllerMesh = refs.playersRef.current[controllingId];
+                        const controllerType = refs.playerMetaRef.current[controllingId]?.characterType || 'player';
+                        const controllerPos = controllerMesh?.position || ballPos;
+                        const inStealRange = !!controllerMesh && isWithinStealReach(
+                            localPlayer.position,
+                            charType,
+                            controllerPos,
+                            controllerType,
+                            ballPos,
+                        );
+                        const behind = isStealerBehindController(
+                            localPlayer.position,
+                            controllerPos,
+                            ballPos,
+                        );
+                        const tackleReach = getTackleReach(charType, controllerType)
+                          * (behind ? STEAL_BEHIND_PENALTY : 1);
+                        controlEffects.stealRing.position.copyFrom(localPlayer.position);
+                        controlEffects.stealRing.position.y = 0.06;
+                        controlEffects.setActionRing(
+                            controlEffects.stealRing,
+                            tackleReach,
+                            inStealRange,
+                        );
+                        controlEffects.stealRing.isVisible = true;
+                        controlEffects.pickupRing.isVisible = false;
+                        controlEffects.stealRing.rotation.y += 0.03;
+                    } else if (!controllingId) {
+                        const dx = ballPos.x - localPlayer.position.x;
+                        const dz = ballPos.z - localPlayer.position.z;
+                        const pickupRadius = getPickupRadius(charType);
+                        controlEffects.pickupRing.position.copyFrom(localPlayer.position);
+                        controlEffects.pickupRing.position.y = 0.05;
+                        controlEffects.setActionRing(
+                            controlEffects.pickupRing,
+                            pickupRadius,
+                            (dx * dx + dz * dz) <= pickupRadius * pickupRadius,
+                        );
+                        controlEffects.pickupRing.isVisible = true;
+                        controlEffects.stealRing.isVisible = false;
+                    } else {
+                        controlEffects.pickupRing.isVisible = false;
+                        controlEffects.stealRing.isVisible = false;
                     }
                 }
 

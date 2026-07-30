@@ -97,8 +97,9 @@ const GOALS_TO_WIN = 3;
 // --- Robo de balón / tackle ---
 const STEAL_GRACE_MS = 400;        // Protección breve tras ganar posesión (evita tira y afloja instantáneo)
 const STEAL_VICTIM_LOCK_MS = 650;  // Tras perderla, la víctima no puede recuperarla de inmediato
-const BOT_STEAL_CHANCE = 0.10;     // Probabilidad por tick de que un bot en rango robe a un rival
+const BOT_STEAL_CHANCE = 0.18;     // Probabilidad por tick de IA (~20Hz) de que un bot en rango robe
 const BOT_STEAL_COOLDOWN_MS = 800; // Separación mínima entre intentos de robo de un bot
+const BOT_AI_EVERY_N_TICKS = 3;    // IA a ~20Hz: evita GC/lag; el movimiento se mantiene entre ticks
 const BALL_RELEASE_MIN = 13; // Minimum shot speed (quick tap)
 const BALL_RELEASE_MAX = 22; // Maximum shot speed (full charge) — reducido para que ni a máxima carga cruce todo el campo
 const PASS_RELEASE_MIN = 8;
@@ -734,125 +735,169 @@ function removeAllBots(state) {
   });
 }
 
-// IA por tick: posesión real, cobertura, ítems, pases bajo presión y disparo.
-// Los bots estabilizan cada recepción antes de decidir para evitar patadas instantáneas.
+function setBotMoveToward(move, bot, x, z, scale = 1) {
+  const dx = x - bot.position.x;
+  const dz = z - bot.position.z;
+  const length = Math.hypot(dx, dz);
+  if (length > 0.001) {
+    move.moveDirection.copyFromFloats((dx / length) * scale, 0, (dz / length) * scale);
+  } else {
+    move.moveDirection.set(0, 0, 0);
+  }
+}
+
+function fireBotMissile(roomId, state, bot, target, now) {
+  bot.missileArmed = false;
+  state.missileCounter += 1;
+  state.missiles.push({
+    id: `missile-${state.missileCounter}`,
+    x: round2(bot.position.x),
+    z: round2(bot.position.z),
+    targetId: target.id,
+    bornAt: now,
+  });
+  io.to(roomId).emit('missileLaunched', {
+    byId: bot.id,
+    byName: bot.name,
+    targetId: target.id,
+    targetName: target.name,
+  });
+}
+
+function releaseBotPass(roomId, state, bot, passTarget, now) {
+  const target = state.players.get(passTarget.targetId);
+  const direction = new Vector3(passTarget.direction.x, 0, passTarget.direction.z);
+  const speed = Math.max(
+    PASS_RELEASE_MIN,
+    Math.min(PASS_RELEASE_MAX, passTarget.distance * PASS_SPEED_PER_UNIT),
+  );
+  bot.isControllingBall = false;
+  bot.wantsControl = false;
+  state.ballVelocity = direction.scale(speed);
+  state.ballLastShotTime = now;
+  state.lastShooter = { id: bot.id, team: bot.team };
+  bot.lastKickTime = now;
+  const sep = (getCharacterStats(bot.characterType).radius || PLAYER_RADIUS) + BALL_RADIUS + 0.8;
+  state.ballPosition.addInPlace(direction.scale(sep));
+  if (target?.isBot) {
+    target.receivingPassUntil = now + 2500;
+    target.wantsControl = true;
+  }
+  log(`[${roomId}] BOT PASS: ${bot.name} -> ${target?.name || passTarget.targetId}.`);
+}
+
+// IA ~20Hz: posesión, cobertura, ítems, pases bajo presión y disparo.
+// El moveDirection se conserva entre ticks de IA, así la física a 60Hz sigue suave.
 function updateBotAI(roomId, state) {
   const ball = state.ballPosition;
   const now = performance.now();
-  const teamBots = { left: [], right: [] };
+  const controller = getController(state);
+  const players = [];
+  let presserLeft = null;
+  let presserRight = null;
+  let presserLeftDistSq = Infinity;
+  let presserRightDistSq = Infinity;
+  const chaseByTeam = { left: null, right: null };
+  const chaseDistSq = { left: Infinity, right: Infinity };
+
   state.players.forEach((p) => {
-    if (p.isBot && p.team) teamBots[p.team].push(p);
+    players.push(p);
+    if (!p.isBot || !p.team || now < (p.stunnedUntil || 0)) return;
+
+    if (controller && controller.team !== p.team) {
+      const dSq = (ball.x - p.position.x) ** 2 + (ball.z - p.position.z) ** 2;
+      if (p.team === 'left' && dSq < presserLeftDistSq) {
+        presserLeftDistSq = dSq;
+        presserLeft = p;
+      } else if (p.team === 'right' && dSq < presserRightDistSq) {
+        presserRightDistSq = dSq;
+        presserRight = p;
+      }
+    }
+
+    if (!controller) {
+      if ((p.receivingPassUntil || 0) > now) {
+        chaseByTeam[p.team] = p;
+        chaseDistSq[p.team] = -1;
+        return;
+      }
+      if (chaseDistSq[p.team] < 0) return;
+      const dSq = (ball.x - p.position.x) ** 2 + (ball.z - p.position.z) ** 2;
+      if (dSq < chaseDistSq[p.team]) {
+        chaseDistSq[p.team] = dSq;
+        chaseByTeam[p.team] = p;
+      }
+    }
   });
 
-  const fireBotMissile = (bot, target) => {
-    bot.missileArmed = false;
-    state.missileCounter += 1;
-    state.missiles.push({
-      id: `missile-${state.missileCounter}`,
-      x: round2(bot.position.x),
-      z: round2(bot.position.z),
-      targetId: target.id,
-      bornAt: now,
-    });
-    io.to(roomId).emit('missileLaunched', {
-      byId: bot.id,
-      byName: bot.name,
-      targetId: target.id,
-      targetName: target.name,
-    });
-  };
-
-  const releaseBotPass = (bot, passTarget) => {
-    const target = state.players.get(passTarget.targetId);
-    const direction = new Vector3(passTarget.direction.x, 0, passTarget.direction.z);
-    const speed = Math.max(
-      PASS_RELEASE_MIN,
-      Math.min(PASS_RELEASE_MAX, passTarget.distance * PASS_SPEED_PER_UNIT),
-    );
-    bot.isControllingBall = false;
-    bot.wantsControl = false;
-    state.ballVelocity = direction.scale(speed);
-    state.ballLastShotTime = now;
-    state.lastShooter = { id: bot.id, team: bot.team };
-    bot.lastKickTime = now;
-    const sep = (getCharacterStats(bot.characterType).radius || PLAYER_RADIUS) + BALL_RADIUS + 0.8;
-    state.ballPosition.addInPlace(direction.scale(sep));
-    if (target?.isBot) {
-      target.receivingPassUntil = now + 2500;
-      target.wantsControl = true;
+  // Un solo misil táctico por tick de IA (el bot armado más cercano al rival).
+  if (controller) {
+    let missileBot = null;
+    let missileDistSq = Infinity;
+    for (let i = 0; i < players.length; i += 1) {
+      const bot = players[i];
+      if (!bot.isBot || !bot.missileArmed || bot.team === controller.team) continue;
+      if (now < (bot.stunnedUntil || 0)) continue;
+      const ownGoalX = bot.team === 'left' ? -FIELD_WIDTH / 2 : FIELD_WIDTH / 2;
+      const distToOwnGoal = Math.hypot(ownGoalX - controller.position.x, controller.position.z);
+      if (distToOwnGoal >= 20) continue;
+      const dSq = (controller.position.x - bot.position.x) ** 2
+        + (controller.position.z - bot.position.z) ** 2;
+      if (dSq < missileDistSq) {
+        missileDistSq = dSq;
+        missileBot = bot;
+      }
     }
-    log(`[${roomId}] BOT PASS: ${bot.name} -> ${target?.name || passTarget.targetId}.`);
-  };
+    if (missileBot) fireBotMissile(roomId, state, missileBot, controller, now);
+  }
 
-  state.players.forEach((bot) => {
-    if (!bot.isBot || !bot.team) return;
+  for (let i = 0; i < players.length; i += 1) {
+    const bot = players[i];
+    if (!bot.isBot || !bot.team) continue;
     const move = state.playerMovements.get(bot.id);
-    if (!move) return;
+    if (!move) continue;
 
     if (now < (bot.stunnedUntil || 0)) {
       move.moveDirection.set(0, 0, 0);
-      return;
+      continue;
     }
 
     const goalX = bot.team === 'left' ? FIELD_WIDTH / 2 : -FIELD_WIDTH / 2;
     const ownGoalX = bot.team === 'left' ? -FIELD_WIDTH / 2 : FIELD_WIDTH / 2;
     const attackSign = bot.team === 'left' ? 1 : -1;
-    const moveToward = (x, z, scale = 1) => {
-      const dx = x - bot.position.x;
-      const dz = z - bot.position.z;
-      const length = Math.hypot(dx, dz);
-      if (length > 0.001) {
-        move.moveDirection.copyFromFloats((dx / length) * scale, 0, (dz / length) * scale);
-      } else {
-        move.moveDirection.set(0, 0, 0);
-      }
-      return length;
-    };
 
-    const controller = getController(state);
-
-    // Misil táctico: solo si el rival portador amenaza nuestra portería.
-    if (bot.missileArmed && controller && controller.team !== bot.team) {
-      const distToOwnGoal = Math.hypot(ownGoalX - controller.position.x, controller.position.z);
-      if (distToOwnGoal < 20) {
-        fireBotMissile(bot, controller);
-      }
-    }
-
-    // Ítems: desviarse si un compañero tiene el balón (o está suelto lejos) y hay
-    // un power-up cercano. No abandonar un pase recibido ni un balón suelto cerca.
+    // Ítems solo con posesión propia o balón suelto.
     const receivingPass = (bot.receivingPassUntil || 0) > now;
-    const distToBall = Math.hypot(ball.x - bot.position.x, ball.z - bot.position.z);
     if (
       controller?.id !== bot.id
       && !receivingPass
       && state.items.length > 0
-      && (!controller || controller.team === bot.team || distToBall > 14)
+      && (!controller || controller.team === bot.team)
     ) {
       let nearestItem = null;
       let minItemDistSq = 12 * 12;
-      state.items.forEach((it) => {
+      for (let j = 0; j < state.items.length; j += 1) {
+        const it = state.items[j];
         const dSq = (it.x - bot.position.x) ** 2 + (it.z - bot.position.z) ** 2;
         if (dSq < minItemDistSq) {
           minItemDistSq = dSq;
           nearestItem = it;
         }
-      });
-      if (nearestItem && (controller?.team === bot.team || !controller)) {
+      }
+      if (nearestItem) {
         bot.wantsControl = false;
-        moveToward(nearestItem.x, nearestItem.z);
-        return;
+        setBotMoveToward(move, bot, nearestItem.x, nearestItem.z);
+        continue;
       }
     }
 
-    // Portador: asentar recepción, pase bajo presión / progresión, remate o toque.
     if (controller?.id === bot.id) {
       bot.wantsControl = true;
       bot.receivingPassUntil = 0;
-      moveToward(goalX, 0);
+      setBotMoveToward(move, bot, goalX, 0);
 
       const heldMs = now - (bot.ballControlTime || now);
-      if (heldMs < BOT_RECEIVE_SETTLE_MS) return;
+      if (heldMs < BOT_RECEIVE_SETTLE_MS) continue;
 
       if (heldMs >= BOT_DRIBBLE_HOLD_MS) {
         const aimX = goalX - bot.position.x;
@@ -865,16 +910,20 @@ function updateBotAI(roomId, state) {
         bot.lastKickTime = now;
         const sep = (getCharacterStats(bot.characterType).radius || PLAYER_RADIUS) + BALL_RADIUS + 0.5;
         state.ballPosition.addInPlace(direction.scale(sep));
-        return;
+        continue;
       }
 
       let rivalPressuring = false;
-      state.players.forEach((p) => {
-        if (!p.team || p.team === bot.team) return;
-        if (Math.hypot(p.position.x - bot.position.x, p.position.z - bot.position.z) < 3.5) {
+      for (let j = 0; j < players.length; j += 1) {
+        const p = players[j];
+        if (!p.team || p.team === bot.team) continue;
+        const dx = p.position.x - bot.position.x;
+        const dz = p.position.z - bot.position.z;
+        if (dx * dx + dz * dz < 3.5 * 3.5) {
           rivalPressuring = true;
+          break;
         }
-      });
+      }
 
       const distToGoal = Math.hypot(goalX - bot.position.x, bot.position.z);
       const passTarget = findAdvancedTeammate(
@@ -882,15 +931,15 @@ function updateBotAI(roomId, state) {
         bot.team,
         bot.position,
         goalX,
-        Array.from(state.players.values()),
+        players,
         { minGoalGain: rivalPressuring ? Math.max(2, BOT_PASS_MIN_GOAL_GAIN - 2) : BOT_PASS_MIN_GOAL_GAIN, now },
       );
 
       const canPass = passTarget
         && now - (bot.lastKickTime || 0) >= (rivalPressuring ? BOT_PASS_COOLDOWN_MS * 0.5 : BOT_PASS_COOLDOWN_MS);
       if (canPass && (rivalPressuring || distToGoal > BOT_SHOOT_DISTANCE)) {
-        releaseBotPass(bot, passTarget);
-        return;
+        releaseBotPass(roomId, state, bot, passTarget, now);
+        continue;
       }
 
       if (distToGoal <= BOT_SHOOT_DISTANCE && now - (bot.lastKickTime || 0) >= BOT_SHOT_COOLDOWN_MS) {
@@ -908,24 +957,16 @@ function updateBotAI(roomId, state) {
         const sep = (stats.radius || PLAYER_RADIUS) + BALL_RADIUS + 0.8;
         state.ballPosition.addInPlace(direction.scale(sep));
       }
-      return;
+      continue;
     }
 
-    // Defensa: el bot más cercano presiona; el resto cubre entre balón y portería.
     if (controller && controller.team !== bot.team) {
       bot.wantsControl = true;
-      const teammates = teamBots[bot.team];
-      const myDistSq = (ball.x - bot.position.x) ** 2 + (ball.z - bot.position.z) ** 2;
-      const isClosestToBall = teammates.every((other) => {
-        if (other.id === bot.id || now < (other.stunnedUntil || 0)) return true;
-        const otherDistSq = (ball.x - other.position.x) ** 2 + (ball.z - other.position.z) ** 2;
-        return myDistSq <= otherDistSq;
-      });
-
-      if (isClosestToBall) {
-        moveToward(ball.x, ball.z);
+      const presser = bot.team === 'left' ? presserLeft : presserRight;
+      if (presser?.id === bot.id) {
+        setBotMoveToward(move, bot, ball.x, ball.z);
         if (
-          isWithinStealReach(bot, controller, state.ballPosition)
+          isWithinStealReach(bot, controller, ball)
           && now >= (controller.controlProtectedUntil || 0)
           && now - (bot.lastStealTime || 0) >= BOT_STEAL_COOLDOWN_MS
           && Math.random() < BOT_STEAL_CHANCE
@@ -942,14 +983,11 @@ function updateBotAI(roomId, state) {
           metrics.ballStealsTotal.inc({ room: roomId, by: 'bot' });
         }
       } else {
-        const coverX = (ball.x + ownGoalX) / 2;
-        const coverZ = ball.z * 0.5;
-        moveToward(coverX, coverZ, 0.95);
+        setBotMoveToward(move, bot, (ball.x + ownGoalX) / 2, ball.z * 0.5, 0.95);
       }
-      return;
+      continue;
     }
 
-    // Apoyo ofensivo cuando un compañero controla.
     if (controller?.team === bot.team) {
       bot.wantsControl = false;
       const lateralSign = bot.id.localeCompare(controller.id) >= 0 ? 1 : -1;
@@ -961,42 +999,25 @@ function updateBotAI(roomId, state) {
         -FIELD_HEIGHT / 2 + 2,
         Math.min(FIELD_HEIGHT / 2 - 2, controller.position.z + lateralSign * BOT_SUPPORT_LATERAL),
       );
-      moveToward(supportX, supportZ, 0.9);
-      return;
+      setBotMoveToward(move, bot, supportX, supportZ, 0.9);
+      continue;
     }
 
-    // Balón libre: receptor previsto > bot más cercano; los demás se abren.
-    let preferredBot = null;
-    let closestDistanceSq = Infinity;
-    state.players.forEach((candidate) => {
-      if (!candidate.isBot || candidate.team !== bot.team || now < (candidate.stunnedUntil || 0)) return;
-      if ((candidate.receivingPassUntil || 0) > now) {
-        preferredBot = candidate;
-        closestDistanceSq = -1;
-        return;
-      }
-      if (closestDistanceSq < 0) return;
-      const dx = ball.x - candidate.position.x;
-      const dz = ball.z - candidate.position.z;
-      const distanceSq = dx * dx + dz * dz;
-      if (distanceSq < closestDistanceSq) {
-        closestDistanceSq = distanceSq;
-        preferredBot = candidate;
-      }
-    });
-
+    const preferredBot = chaseByTeam[bot.team];
     if (preferredBot?.id === bot.id) {
       bot.wantsControl = true;
-      moveToward(ball.x, ball.z);
+      setBotMoveToward(move, bot, ball.x, ball.z);
     } else {
       bot.wantsControl = false;
-      moveToward(
+      setBotMoveToward(
+        move,
+        bot,
         ball.x + attackSign * BOT_SUPPORT_AHEAD,
         Math.max(-FIELD_HEIGHT / 2 + 2, Math.min(FIELD_HEIGHT / 2 - 2, ball.z + BOT_SUPPORT_LATERAL)),
         0.8,
       );
     }
-  });
+  }
 }
 
 // --- Ítems de velocidad ---
@@ -1275,8 +1296,10 @@ function updateGamePhysics(roomId, state) {
       endMatchByTime(roomId, state);
       return;
     }
-    // IA de bots: decide movimiento/golpeo antes de integrar la física.
-    updateBotAI(roomId, state);
+    // IA de bots a ~20Hz (physicsTickCount lo incrementa el bucle externo).
+    if (state.physicsTickCount % BOT_AI_EVERY_N_TICKS === 0) {
+      updateBotAI(roomId, state);
+    }
   }
 
   // 1. Actualizar Jugadores
