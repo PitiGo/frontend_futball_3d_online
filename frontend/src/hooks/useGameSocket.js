@@ -1,6 +1,14 @@
 import { useCallback, useEffect } from 'react';
 import { io } from 'socket.io-client';
 
+function getClientTimeZone() {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || null;
+  } catch {
+    return null;
+  }
+}
+
 export function useGameSocket({
   roomId,
   hasJoined,
@@ -70,7 +78,11 @@ export function useGameSocket({
     const handleConnect = () => {
       cb().onConnected?.();
       if (hasJoined && playerName) {
-        socket.emit('joinGame', { name: playerName, roomId });
+        socket.emit('joinGame', {
+          name: playerName,
+          roomId,
+          timeZone: getClientTimeZone(),
+        });
       }
     };
 
@@ -125,9 +137,10 @@ export function useGameSocket({
     // Enviamos el último RTT medido junto al siguiente ping para que el servidor
     // lo registre en Prometheus (país + sala + histograma).
     let lastRttMs = null;
+    const clientTimeZone = getClientTimeZone();
     const emitPingCheck = () => {
       if (!socket.connected) return;
-      socket.emit('pingCheck', { t: Date.now(), rtt: lastRttMs });
+      socket.emit('pingCheck', { t: Date.now(), rtt: lastRttMs, timeZone: clientTimeZone });
     };
     const handlePong = (clientTime) => {
       const rtt = Date.now() - clientTime;

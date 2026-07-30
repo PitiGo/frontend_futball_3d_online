@@ -414,7 +414,13 @@ const Game = () => {
             // compatible browsers. Portrait overlay remains the universal fallback.
             void requestLandscape();
         }
-        socketRef.current.emit('joinGame', { name: name.trim(), roomId });
+        let timeZone = null;
+        try {
+            timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || null;
+        } catch {
+            timeZone = null;
+        }
+        socketRef.current.emit('joinGame', { name: name.trim(), roomId, timeZone });
         setPlayerName(name);
         setHasJoined(true);
     };

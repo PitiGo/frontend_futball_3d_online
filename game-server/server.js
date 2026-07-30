@@ -25,11 +25,24 @@ import {
   BALL_RADIUS,
 } from './physics/collisions.js';
 import * as metrics from './metrics.js';
-import { getClientIp, resolveClientCountry } from './geo.js';
+import { resolveClientCountry } from './geo.js';
 
 const app = express();
 // Necesario para leer la IP real detrás de reverse proxy (x-forwarded-for).
 app.set('trust proxy', 1);
+
+function applyClientOrigin(socket, { timeZone } = {}) {
+  const tz = (typeof timeZone === 'string' && timeZone.trim())
+    ? timeZone.trim().slice(0, 64)
+    : socket.data.timeZone;
+  if (tz) socket.data.timeZone = tz;
+  const origin = resolveClientCountry(socket, { timeZone: socket.data.timeZone });
+  socket.data.country = origin.country;
+  socket.data.ipCountry = origin.ipCountry;
+  socket.data.countrySource = origin.source;
+  socket.data.clientIp = origin.ip;
+  return origin;
+}
 
 // --- Logger gateado por entorno ---
 // En producción (NODE_ENV=production) silenciamos los logs de depuración para
@@ -265,6 +278,9 @@ app.get('/:roomId/status', (req, res) => {
       id: p.id,
       name: p.name,
       country: p.country || null,
+      ipCountry: p.ipCountry || null,
+      timeZone: p.timeZone || null,
+      countrySource: p.countrySource || null,
       rttMs: Number.isFinite(p.rttMs) ? p.rttMs : null,
       team: p.team,
       characterType: p.characterType,
@@ -1784,18 +1800,33 @@ io.on('connection', (socket) => {
   log(`++ Cliente conectado: ${socket.id}`);
   metrics.playerConnectionsTotal.inc();
   let currentRoomId = null; // ID de la sala para este socket
-  const clientCountry = resolveClientCountry(socket);
-  const clientIp = getClientIp(socket);
-  socket.data.country = clientCountry;
-  log(`++ Origen ${socket.id}: country=${clientCountry} ip=${clientIp}`);
+  const initialOrigin = applyClientOrigin(socket);
+  log(
+    `++ Origen ${socket.id}: country=${initialOrigin.country} `
+    + `ipCountry=${initialOrigin.ipCountry || '-'} source=${initialOrigin.source} `
+    + `ip=${initialOrigin.ip}`,
+  );
 
   // Medición de latencia: el cliente envía timestamp (+ último RTT) y lo devolvemos.
-  // Compat: payload puede ser number (legado) u objeto { t, rtt }.
+  // Compat: payload puede ser number (legado) u objeto { t, rtt, timeZone }.
   socket.on('pingCheck', (payload) => {
     const clientTime = typeof payload === 'number'
       ? payload
       : (payload && typeof payload === 'object' ? payload.t : null);
     if (clientTime != null) socket.emit('pongCheck', clientTime);
+
+    if (payload && typeof payload === 'object' && payload.timeZone) {
+      applyClientOrigin(socket, { timeZone: payload.timeZone });
+      if (currentRoomId && salaStates[currentRoomId]) {
+        const player = salaStates[currentRoomId].players.get(socket.id);
+        if (player && !player.isBot) {
+          player.country = socket.data.country;
+          player.ipCountry = socket.data.ipCountry;
+          player.timeZone = socket.data.timeZone;
+          player.countrySource = socket.data.countrySource;
+        }
+      }
+    }
 
     const reportedRtt = (payload && typeof payload === 'object') ? Number(payload.rtt) : NaN;
     if (!Number.isFinite(reportedRtt)) return;
@@ -1820,8 +1851,9 @@ io.on('connection', (socket) => {
   const CHAT_MIN_GAP_MS = 400;  // Separación mínima entre mensajes
 
   // Handler 'joinGame'
-  socket.on('joinGame', ({ name, roomId }) => {
+  socket.on('joinGame', ({ name, roomId, timeZone } = {}) => {
     log(`[${roomId || 'N/A'}] -> joinGame de ${socket.id} (${name})`);
+    const origin = applyClientOrigin(socket, { timeZone });
 
     // Validaciones
     if (!roomId || !availableSalas.includes(roomId)) {
@@ -1886,16 +1918,23 @@ io.on('connection', (socket) => {
       missileArmed: false,    // Lleva un misil listo para dispararse contra el rival más cercano
       goals: 0,               // Goles anotados en el partido actual
       roomId: roomId, // Referencia a su sala
-      country: clientCountry,
+      country: origin.country,
+      ipCountry: origin.ipCountry,
+      timeZone: origin.timeZone,
+      countrySource: origin.source,
       rttMs: null,
       rttUpdatedAt: 0,
     };
     state.players.set(socket.id, playerData);
     state.playerMovements.set(socket.id, { moveDirection: Vector3.Zero() });
     metrics.playerJoinsTotal.inc({ room: roomId });
-    metrics.playerJoinsByCountryTotal.inc({ country: clientCountry, room: roomId });
+    metrics.playerJoinsByCountryTotal.inc({ country: origin.country, room: roomId });
 
-    log(`[${roomId}] Jugador ${sanitizedName} (${socket.id}) añadido y unido [country=${clientCountry}].`);
+    log(
+      `[${roomId}] Jugador ${sanitizedName} (${socket.id}) unido `
+      + `[country=${origin.country} ipCountry=${origin.ipCountry || '-'} `
+      + `tz=${origin.timeZone || '-'} source=${origin.source}]`,
+    );
 
     // Enviar confirmación y estado actual al nuevo jugador
     socket.emit('gameJoined', { id: socket.id, name: sanitizedName, roomId: roomId });
