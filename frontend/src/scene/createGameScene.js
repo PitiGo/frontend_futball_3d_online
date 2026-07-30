@@ -7,7 +7,13 @@ import * as CANNON from 'cannon-es';
 import CharacterManager from '../services/characterManager';
 import { createScoreDisplay } from './scoreDisplay';
 import { createControlEffect } from './createControlEffect';
-import { getPickupRadius, getTackleReach, isWithinStealReach } from '../constants/characterStats';
+import {
+  getPickupRadius,
+  getTackleReach,
+  isWithinStealReach,
+  isStealerBehindController,
+  STEAL_BEHIND_PENALTY,
+} from '../constants/characterStats';
 import { createProceduralField, FIELD_WIDTH, FIELD_HEIGHT } from './createField';
 import { createGoal } from './createGoal';
 import { upgradeMissileItemMeshes } from './updateGameState';
@@ -785,14 +791,21 @@ export function createGameScene(canvas, { refs, isMobileRef, onSceneReady, onLoa
                             const controllerMesh = refs.playersRef.current[controllingId];
                             const controllerType = refs.playerMetaRef.current[controllingId]?.characterType || 'player';
                             const ballPos = refs.ballRef.current.position;
-                            const inStealRange = controllerMesh && isWithinStealReach(
+                            const controllerPos = controllerMesh?.position || ballPos;
+                            const inStealRange = !!controllerMesh && isWithinStealReach(
                                 localPlayer.position,
                                 charType,
-                                controllerMesh.position,
+                                controllerPos,
                                 controllerType,
                                 ballPos,
                             );
-                            const tackleReach = getTackleReach(charType, controllerType);
+                            const behind = isStealerBehindController(
+                                localPlayer.position,
+                                controllerPos,
+                                ballPos,
+                            );
+                            const tackleReach = getTackleReach(charType, controllerType)
+                              * (behind ? STEAL_BEHIND_PENALTY : 1);
                             controlEffects.stealRing.position.copyFrom(localPlayer.position);
                             controlEffects.stealRing.position.y = 0.06;
                             controlEffects.setActionRing(

@@ -201,42 +201,63 @@ const TeamSelectionScreen = ({
     const full = (teams?.[team]?.length || 0) >= maxPlayersPerTeam;
     const hasBots = (teams?.[team] || []).some((p) => typeof p.id === 'string' && p.id.startsWith('bot-'));
     return (
-      <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.5rem' }}>
-        <button
-          type="button"
-          onClick={() => onAddBot(team)}
-          disabled={full}
-          style={{
-            flex: 1,
-            padding: '0.4rem',
-            backgroundColor: full ? '#cbd5e1' : '#0f766e',
-            color: 'white',
-            border: 'none',
-            borderRadius: '6px',
-            cursor: full ? 'not-allowed' : 'pointer',
-            fontSize: '0.8rem',
-            fontWeight: 600,
-          }}
-        >
-          {`+ ${t('teamSelection.addBot')}`}
-        </button>
-        {hasBots && onRemoveBot && (
+      <div style={{ marginBottom: compact ? '0.35rem' : '0.5rem' }}>
+        <div style={{ display: 'flex', gap: '0.5rem' }}>
           <button
             type="button"
-            onClick={() => onRemoveBot(team)}
+            onClick={() => onAddBot(team)}
+            disabled={full}
             style={{
-              padding: '0.4rem 0.7rem',
-              backgroundColor: '#64748b',
+              flex: 1,
+              padding: compact ? '0.3rem' : '0.4rem',
+              backgroundColor: full ? '#cbd5e1' : '#0f766e',
               color: 'white',
               border: 'none',
               borderRadius: '6px',
-              cursor: 'pointer',
-              fontSize: '0.8rem',
+              cursor: full ? 'not-allowed' : 'pointer',
+              fontSize: compact ? '0.72rem' : '0.8rem',
               fontWeight: 600,
             }}
           >
-            {`− ${t('teamSelection.removeBot')}`}
+            {`+ ${t('teamSelection.addBot')}`}
           </button>
+          {hasBots && onRemoveBot && (
+            <button
+              type="button"
+              onClick={() => onRemoveBot(team)}
+              style={{
+                padding: compact ? '0.3rem 0.55rem' : '0.4rem 0.7rem',
+                backgroundColor: '#64748b',
+                color: 'white',
+                border: 'none',
+                borderRadius: '6px',
+                cursor: 'pointer',
+                fontSize: compact ? '0.72rem' : '0.8rem',
+                fontWeight: 600,
+              }}
+            >
+              {`− ${t('teamSelection.removeBot')}`}
+            </button>
+          )}
+        </div>
+        {hasBots && (
+          <div style={{
+            marginTop: '0.4rem',
+            padding: compact ? '0.35rem 0.5rem' : '0.5rem 0.75rem',
+            backgroundColor: 'rgba(15, 118, 110, 0.08)',
+            border: '1px solid rgba(15, 118, 110, 0.2)',
+            borderRadius: '6px',
+            fontSize: compact ? '0.65rem' : '0.75rem',
+            color: '#0f766e',
+            textAlign: 'left',
+          }}>
+            <div style={{ fontWeight: 'bold', marginBottom: '0.15rem' }}>
+              {t('teamSelection.botBehaviorTitle')}
+            </div>
+            <div style={{ whiteSpace: 'pre-line', lineHeight: 1.3, opacity: 0.9 }}>
+              {t('teamSelection.botBehaviorDesc')}
+            </div>
+          </div>
         )}
       </div>
     );

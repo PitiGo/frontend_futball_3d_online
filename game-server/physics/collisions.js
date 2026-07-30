@@ -33,6 +33,8 @@ export function getCharacterStats(characterType) {
 export const BALL_CONTROL_RADIUS = 1.5;
 export const STEAL_RADIUS_BONUS = 1.35;
 export const PICKUP_RADIUS_BONUS = 1.25;
+/** Multiplicador del alcance de tackle cuando el robador está a la espalda del portador. */
+export const STEAL_BEHIND_PENALTY = 0.55;
 
 export function getStealReach(characterType, bonus = STEAL_RADIUS_BONUS) {
   const stats = getCharacterStats(characterType);
@@ -47,17 +49,52 @@ export function getTackleReach(stealerType, controllerType, bonus = STEAL_RADIUS
   return stealReach + stealerR + controllerR * 0.55;
 }
 
+/**
+ * Dirección a la que mira el portador en XZ.
+ * Preferencia: cuaternión Babylon; si no hay, el balón (que se mantiene delante).
+ */
+export function getControllerFacingXZ(controller, ballPosition) {
+  const rot = controller?.rotation;
+  if (rot && typeof rot.w === 'number') {
+    const { x, y, z, w } = rot;
+    // Rota el vector local +Z por el cuaternión.
+    const fx = 2 * (x * z + w * y);
+    const fz = 1 - 2 * (x * x + y * y);
+    const len = Math.hypot(fx, fz);
+    if (len > 1e-4) return { x: fx / len, z: fz / len };
+  }
+  if (ballPosition && controller?.position) {
+    const fx = ballPosition.x - controller.position.x;
+    const fz = ballPosition.z - controller.position.z;
+    const len = Math.hypot(fx, fz);
+    if (len > 0.08) return { x: fx / len, z: fz / len };
+  }
+  return { x: 0, z: 1 };
+}
+
+export function isStealerBehindController(stealer, controller, ballPosition) {
+  const facing = getControllerFacingXZ(controller, ballPosition);
+  const sx = stealer.position.x - controller.position.x;
+  const sz = stealer.position.z - controller.position.z;
+  return sx * facing.x + sz * facing.z < 0;
+}
+
 export function isWithinStealReach(stealer, controller, ballPosition, bonus = STEAL_RADIUS_BONUS) {
   const stealReach = getStealReach(stealer.characterType, bonus);
   const stealReachSq = stealReach * stealReach;
+  const behind = isStealerBehindController(stealer, controller, ballPosition);
 
+  // Contacto directo con el balón: desde atrás exige más cercanía (~70%).
+  const ballReachSq = behind ? stealReachSq * 0.49 : stealReachSq;
   const bdx = ballPosition.x - stealer.position.x;
   const bdz = ballPosition.z - stealer.position.z;
-  if (bdx * bdx + bdz * bdz <= stealReachSq) return true;
+  if (bdx * bdx + bdz * bdz <= ballReachSq) return true;
 
+  // Tackle al cuerpo: desde la espalda el alcance cae ~45%.
   const cdx = controller.position.x - stealer.position.x;
   const cdz = controller.position.z - stealer.position.z;
-  const tackleReach = getTackleReach(stealer.characterType, controller.characterType, bonus);
+  const tackleReach = getTackleReach(stealer.characterType, controller.characterType, bonus)
+    * (behind ? STEAL_BEHIND_PENALTY : 1);
   return cdx * cdx + cdz * cdz <= tackleReach * tackleReach;
 }
 

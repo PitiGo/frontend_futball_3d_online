@@ -166,12 +166,33 @@ test('stepPlayerVelocityXZ eases toward target speed', () => {
   assert.equal(vel.y, 0);
 });
 
-test('isWithinStealReach allows tackle from behind when pressing the carrier', () => {
-  const stealer = { characterType: 'player', position: { x: 0, z: -1.0 } };
-  const controller = { characterType: 'player', position: { x: 0, z: 0 } };
-  const ball = { x: 0, z: 1.05 }; // balón adelante del portador
+test('isWithinStealReach allows frontal tackle when pressing the carrier', () => {
+  const stealer = { characterType: 'player', position: { x: 0, z: 1.2 } };
+  const controller = {
+    characterType: 'player',
+    position: { x: 0, z: 0 },
+    rotation: { x: 0, y: 0, z: 0, w: 1 }, // mirando +Z
+  };
+  const ball = { x: 0, z: 1.05 };
 
   assert.equal(isWithinStealReach(stealer, controller, ball), true);
+});
+
+test('isWithinStealReach requires closer contact from behind', () => {
+  const controller = {
+    characterType: 'player',
+    position: { x: 0, z: 0 },
+    rotation: { x: 0, y: 0, z: 0, w: 1 }, // mirando +Z
+  };
+  const ball = { x: 0, z: 1.05 };
+
+  // A ~1.8u por detrás: antes entraba; ahora la penalización lo niega.
+  const farBehind = { characterType: 'player', position: { x: 0, z: -1.8 } };
+  assert.equal(isWithinStealReach(farBehind, controller, ball), false);
+
+  // Pegado a la espalda: sigue siendo válido.
+  const closeBehind = { characterType: 'player', position: { x: 0, z: -0.9 } };
+  assert.equal(isWithinStealReach(closeBehind, controller, ball), true);
 });
 
 test('isWithinStealReach still requires real proximity to ball or carrier', () => {
