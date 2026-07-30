@@ -10,14 +10,7 @@ const vectorsApproximatelyEqual = (a, b, epsilon = VECTOR_EPSILON) =>
 /**
  * Keyboard + keepalive movement for the local player.
  */
-export function useControls({
-  socketRef,
-  gameStarted,
-  isConnected,
-  chatInputFocusRef,
-  wantsControlRef,
-  onBallControlChange,
-}) {
+export function useControls({ socketRef, gameStarted, isConnected, chatInputFocusRef, wantsControlRef }) {
   const keysPressed = useRef({ up: false, down: false, left: false, right: false });
   const joystickMoveRef = useRef({ x: 0, z: 0 });
   const lastEmittedMoveRef = useRef({ x: 0, z: 0 });
@@ -112,14 +105,13 @@ export function useControls({
           if (wantsControlRef) wantsControlRef.current = true;
           // ballControl must stay non-volatile — possession start/end must not be dropped.
           socketRef.current.emit('ballControl', { control: true });
-          onBallControlChange?.(true);
           break;
         default:
           break;
       }
       if (keyChanged) sendMovement();
     },
-    [chatInputFocusRef, isConnected, onBallControlChange, sendMovement, socketRef, wantsControlRef]
+    [chatInputFocusRef, isConnected, sendMovement, socketRef, wantsControlRef]
   );
 
   const handleKeyUp = useCallback(
@@ -151,14 +143,13 @@ export function useControls({
           if (wantsControlRef) wantsControlRef.current = false;
           // ballControl must stay non-volatile — possession start/end must not be dropped.
           socketRef.current.emit('ballControl', { control: false });
-          onBallControlChange?.(false);
           break;
         default:
           break;
       }
       if (keyChanged) sendMovement();
     },
-    [chatInputFocusRef, isConnected, onBallControlChange, sendMovement, socketRef, wantsControlRef]
+    [chatInputFocusRef, isConnected, sendMovement, socketRef, wantsControlRef]
   );
 
   useEffect(() => {
