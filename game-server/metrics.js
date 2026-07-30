@@ -136,6 +136,29 @@ export const physicsTickDurationMs = new client.Histogram({
   registers: [register],
 });
 
+// RTT reportado por el cliente (ms), etiquetado por país ISO y sala.
+// Buckets pensados para latencia intercontinental (UY→FR ~200–400 ms).
+export const playerRttMs = new client.Histogram({
+  name: 'football_player_rtt_ms',
+  help: 'RTT cliente↔servidor reportado por pingCheck (ms)',
+  labelNames: ['country', 'room'],
+  buckets: [20, 40, 80, 120, 160, 200, 250, 300, 400, 500, 750, 1000, 2000, 5000],
+  registers: [register],
+});
+
+export const playerJoinsByCountryTotal = new client.Counter({
+  name: 'football_player_joins_by_country_total',
+  help: 'Jugadores que entran a una sala, por país de origen',
+  labelNames: ['country', 'room'],
+  registers: [register],
+});
+
+/** Observa una muestra de RTT (ms). Ignora valores no finitos o fuera de rango. */
+export function observePlayerRtt({ country = 'unknown', room = 'none' }, rttMs) {
+  if (!Number.isFinite(rttMs) || rttMs < 0 || rttMs > 60000) return;
+  playerRttMs.observe({ country: String(country || 'unknown'), room: String(room || 'none') }, rttMs);
+}
+
 // ---------------------------------------------------------------------------
 // Gauges (estado instantáneo). Se recalculan en cada scrape a partir del
 // snapshot del servidor para evitar inc/dec dispersos y propensos a errores.
@@ -204,6 +227,43 @@ new client.Gauge({
     let active = 0;
     for (const r of getSnapshot().rooms || []) if (r.active) active += 1;
     this.set(active);
+  },
+});
+
+new client.Gauge({
+  name: 'football_humans_by_country',
+  help: 'Humanos conectados en salas, por país ISO',
+  labelNames: ['country'],
+  registers: [register],
+  collect() {
+    this.reset();
+    const byCountry = new Map();
+    for (const p of getSnapshot().humanLatency || []) {
+      const c = p.country || 'unknown';
+      byCountry.set(c, (byCountry.get(c) || 0) + 1);
+    }
+    for (const [country, n] of byCountry) this.set({ country }, n);
+  },
+});
+
+new client.Gauge({
+  name: 'football_player_rtt_current_ms',
+  help: 'Último RTT conocido (ms) por jugador humano (labels country/room/name)',
+  labelNames: ['country', 'room', 'name'],
+  registers: [register],
+  collect() {
+    this.reset();
+    for (const p of getSnapshot().humanLatency || []) {
+      if (!Number.isFinite(p.rttMs)) continue;
+      this.set(
+        {
+          country: p.country || 'unknown',
+          room: p.room || 'none',
+          name: String(p.name || 'anon').slice(0, 24),
+        },
+        p.rttMs,
+      );
+    }
   },
 });
 /* eslint-enable no-new */

@@ -122,8 +122,16 @@ export function useGameSocket({
     socket.on('chatError', handleChatError);
 
     // --- Latencia y estado de conexión ---
+    // Enviamos el último RTT medido junto al siguiente ping para que el servidor
+    // lo registre en Prometheus (país + sala + histograma).
+    let lastRttMs = null;
+    const emitPingCheck = () => {
+      if (!socket.connected) return;
+      socket.emit('pingCheck', { t: Date.now(), rtt: lastRttMs });
+    };
     const handlePong = (clientTime) => {
       const rtt = Date.now() - clientTime;
+      if (Number.isFinite(rtt) && rtt >= 0) lastRttMs = rtt;
       cb().onPing?.(rtt);
     };
     const handleDisconnect = () => cb().onConnectionStatus?.('disconnected');
@@ -136,10 +144,8 @@ export function useGameSocket({
     socket.io.on('reconnect', handleReconnect);
 
     // Sondeo de ping cada 2s (solo si está conectado).
-    const pingInterval = setInterval(() => {
-      if (socket.connected) socket.emit('pingCheck', Date.now());
-    }, 2000);
-    if (socket.connected) socket.emit('pingCheck', Date.now());
+    const pingInterval = setInterval(emitPingCheck, 2000);
+    emitPingCheck();
 
     const engine = engineRef.current;
     if (engine && !engine.isPointerLock) {

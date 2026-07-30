@@ -109,6 +109,93 @@
         { "expr": "football_process_resident_memory_bytes", "legendFormat": "RSS", "refId": "A" },
         { "expr": "football_nodejs_heap_size_used_bytes", "legendFormat": "heap usado", "refId": "B" }
       ]
+    },
+    {
+      "type": "timeseries",
+      "title": "RTT p50 / p95 / p99 (ms) por país",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 28 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "custom": { "drawStyle": "line", "fillOpacity": 10 }
+        }
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, sum by (le, country) (rate(football_player_rtt_ms_bucket[5m])))",
+          "legendFormat": "{{country}} p50",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum by (le, country) (rate(football_player_rtt_ms_bucket[5m])))",
+          "legendFormat": "{{country}} p95",
+          "refId": "B"
+        },
+        {
+          "expr": "histogram_quantile(0.99, sum by (le, country) (rate(football_player_rtt_ms_bucket[5m])))",
+          "legendFormat": "{{country}} p99",
+          "refId": "C"
+        }
+      ]
+    },
+    {
+      "type": "bargauge",
+      "title": "Humanos conectados por país",
+      "gridPos": { "h": 8, "w": 6, "x": 12, "y": 28 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "options": { "orientation": "horizontal", "displayMode": "gradient", "showUnfilled": true },
+      "fieldConfig": { "defaults": { "min": 0, "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] } } },
+      "targets": [
+        { "expr": "football_humans_by_country", "legendFormat": "{{country}}", "refId": "A" }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Joins por país (acumulado)",
+      "gridPos": { "h": 8, "w": 6, "x": 18, "y": 28 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "textMode": "value_and_name" },
+      "targets": [
+        { "expr": "sum by (country) (football_player_joins_by_country_total)", "legendFormat": "{{country}}", "refId": "A" }
+      ]
+    },
+    {
+      "type": "table",
+      "title": "RTT actual por jugador (país / sala / nombre)",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 36 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "options": { "showHeader": true, "sortBy": [{ "displayName": "Value", "desc": true }] },
+      "transformations": [
+        { "id": "labelsToFields", "options": {} },
+        { "id": "organize", "options": {
+          "excludeByName": { "Time": true, "__name__": true, "app": true, "instance": true, "job": true },
+          "renameByName": { "country": "País", "room": "Sala", "name": "Jugador", "Value": "RTT (ms)" }
+        }}
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 120 },
+              { "color": "orange", "value": 250 },
+              { "color": "red", "value": 400 }
+            ]
+          }
+        }
+      },
+      "targets": [
+        {
+          "expr": "football_player_rtt_current_ms",
+          "legendFormat": "",
+          "format": "table",
+          "instant": true,
+          "refId": "A"
+        }
+      ]
     }
   ]
 }
