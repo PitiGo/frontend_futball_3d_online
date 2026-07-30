@@ -166,6 +166,15 @@ test('stepPlayerVelocityXZ eases toward target speed', () => {
   assert.equal(vel.y, 0);
 });
 
+test('stepPlayerVelocityXZ reverses direction quickly', () => {
+  const vel = { x: 5, y: 0, z: 0 };
+  // Con la aceleración actual, un giro 180° debe completar en ~0.2s.
+  for (let i = 0; i < 12; i += 1) {
+    stepPlayerVelocityXZ(vel, -5, 0, 1 / 60);
+  }
+  assert.ok(vel.x < -4.5, `expected near -5 after reverse, got ${vel.x}`);
+});
+
 test('isWithinStealReach allows frontal tackle when pressing the carrier', () => {
   const stealer = { characterType: 'player', position: { x: 0, z: 1.2 } };
   const controller = {

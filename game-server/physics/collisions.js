@@ -101,8 +101,10 @@ export function isWithinStealReach(stealer, controller, ballPosition, bonus = ST
 export const PASS_ASSIST_ANGLE_DEG = 20;
 export const PASS_ASSIST_MAX_DIST = 22;
 
-export const PLAYER_ACCEL = 28;
-export const PLAYER_DECEL = 22;
+// Aceleración/frenado altos: el giro y el cambio de dirección deben sentirse
+// inmediatos (arcade), no como inercia pesada de simulación.
+export const PLAYER_ACCEL = 55;
+export const PLAYER_DECEL = 48;
 
 /**
  * Select the teammate most closely aligned with the requested direction.
